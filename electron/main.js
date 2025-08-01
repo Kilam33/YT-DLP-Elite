@@ -53,12 +53,13 @@ async function saveSettings() {
 }
 
 // Create main window
-function createWindow() {
+async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1200,
     minHeight: 700,
+    icon: path.join(__dirname, '../resources/icon.svg'),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -78,7 +79,24 @@ function createWindow() {
     ? 'http://localhost:3111' 
     : `file://${path.join(__dirname, '../dist/index.html')}`;
 
-  mainWindow.loadURL(startUrl);
+  console.log('Loading URL:', startUrl);
+  
+  // Check if the dist folder and index.html exist in production
+  if (!isDev) {
+    const indexPath = path.join(__dirname, '../dist/index.html');
+    try {
+      await fs.access(indexPath);
+      console.log('Found index.html at:', indexPath);
+    } catch (error) {
+      console.error('index.html not found at:', indexPath);
+      console.error('Make sure to run "npm run build" before packaging');
+      return;
+    }
+  }
+  
+  mainWindow.loadURL(startUrl).catch((error) => {
+    console.error('Failed to load URL:', error);
+  });
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -89,6 +107,15 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  // Add error handling for page load failures
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    console.error('Page failed to load:', {
+      errorCode,
+      errorDescription,
+      validatedURL
+    });
   });
 }
 
@@ -143,7 +170,7 @@ function serializeDownload(download) {
 // App event handlers
 app.whenReady().then(async () => {
   await loadSettings();
-  createWindow();
+  await createWindow();
 });
 
 app.on('window-all-closed', () => {
@@ -152,9 +179,9 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('activate', () => {
+app.on('activate', async () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
+    await createWindow();
   }
 });
 

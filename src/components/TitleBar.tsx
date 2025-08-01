@@ -1,5 +1,6 @@
 import React from 'react';
-import { Minus, Square, X, Download } from 'lucide-react';
+import { Minus, Square, X } from 'lucide-react';
+import Logo from './Logo';
 
 interface TitleBarProps {
   onMinimize: () => void;
@@ -12,7 +13,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ onMinimize, onMaximize, onClose }) 
     <div className="flex justify-between items-center h-8 bg-slate-900/90 backdrop-blur-sm border-b border-slate-700/50 drag-region select-none">
       {/* App Title */}
       <div className="flex items-center px-4 space-x-2">
-        <Download className="w-4 h-4 text-lime-400" />
+        <Logo size={16} className="text-lime-400" />
         <span className="text-sm font-semibold text-white">YT-DLP Elite</span>
       </div>
       
