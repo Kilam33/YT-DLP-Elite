@@ -16,6 +16,54 @@ interface Settings {
   writeDescription: boolean;
   writeInfoJson: boolean;
   verboseLogging: boolean; // Show all console logs or only important ones
+  
+  // Advanced Queue Settings
+  queueProcessingDelay: number; // Delay between starting downloads (ms)
+  maxRetriesPerDownload: number; // Maximum retries per individual download
+  autoRetryFailed: boolean; // Automatically retry failed downloads
+  
+  // File Management
+  maxFileSize: number; // Maximum file size in MB (0 = unlimited)
+  skipExistingFiles: boolean; // Skip downloading if file already exists
+  createSubdirectories: boolean; // Create subdirectories for different content types
+  
+  // Network & Performance
+  connectionTimeout: number; // Connection timeout in seconds
+  socketTimeout: number; // Socket timeout in seconds
+  maxDownloadsPerHour: number; // Rate limiting (0 = unlimited)
+  
+  // Authentication & Cookies
+  useCookies: boolean; // Use cookies for authentication
+  cookiesFilePath: string; // Path to cookies file
+  userAgent: string; // Custom user agent string
+  
+  // Proxy Settings
+  useProxy: boolean; // Use proxy for downloads
+  proxyUrl: string; // Proxy URL (e.g., http://proxy:port)
+  proxyUsername: string; // Proxy username
+  proxyPassword: string; // Proxy password
+  
+  // Advanced yt-dlp Options
+  extractAudioFormat: string; // Audio format for extraction (mp3, m4a, etc.)
+  videoFormat: string; // Preferred video format (mp4, mkv, etc.)
+  audioQuality: string; // Audio quality (best, worst, etc.)
+  videoQuality: string; // Video quality (best, worst, etc.)
+  
+  // Metadata & Info
+  writePlaylistInfo: boolean; // Write playlist info for playlists
+  writeAnnotations: boolean; // Write video annotations
+  writeComments: boolean; // Write video comments
+  
+  // Processing Options
+  postProcessors: string; // Custom post-processor arguments
+  mergeVideoFormats: boolean; // Merge video and audio formats
+  preferFreeFormats: boolean; // Prefer free formats over non-free ones
+  
+  // Debug & Development
+  enableDebugMode: boolean; // Enable debug mode for yt-dlp
+  logLevel: string; // Log level (debug, info, warning, error)
+  saveLogsToFile: boolean; // Save logs to file
+  logsDirectory: string; // Directory to save logs
 }
 
 interface SettingsState {
@@ -41,6 +89,54 @@ const initialState: SettingsState = {
     writeDescription: false,
     writeInfoJson: false,
     verboseLogging: false, // Default to showing only important logs
+    
+    // Advanced Queue Settings
+    queueProcessingDelay: 1000, // 1 second delay
+    maxRetriesPerDownload: 3,
+    autoRetryFailed: false,
+    
+    // File Management
+    maxFileSize: 0, // Unlimited
+    skipExistingFiles: true,
+    createSubdirectories: false,
+    
+    // Network & Performance
+    connectionTimeout: 30,
+    socketTimeout: 60,
+    maxDownloadsPerHour: 0, // Unlimited
+    
+    // Authentication & Cookies
+    useCookies: false,
+    cookiesFilePath: '',
+    userAgent: '',
+    
+    // Proxy Settings
+    useProxy: false,
+    proxyUrl: '',
+    proxyUsername: '',
+    proxyPassword: '',
+    
+    // Advanced yt-dlp Options
+    extractAudioFormat: 'mp3',
+    videoFormat: 'mp4',
+    audioQuality: 'best',
+    videoQuality: 'best',
+    
+    // Metadata & Info
+    writePlaylistInfo: false,
+    writeAnnotations: false,
+    writeComments: false,
+    
+    // Processing Options
+    postProcessors: '',
+    mergeVideoFormats: true,
+    preferFreeFormats: true,
+    
+    // Debug & Development
+    enableDebugMode: false,
+    logLevel: 'info',
+    saveLogsToFile: false,
+    logsDirectory: '',
   },
   isOpen: false,
   activeTab: 'general',

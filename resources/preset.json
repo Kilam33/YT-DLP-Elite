@@ -1,0 +1,121 @@
+{
+  "tool": "yt-dlp",
+  "category": "Media Downloader and Extractor",
+  "capabilities": [
+    {
+      "name": "Extract MP4 Video",
+      "description": "Download and convert media to MP4 using ffmpeg for lossless quality",
+      "command": "yt-dlp -x --audio-format mp4 --audio-quality 0 <URL>"
+    },
+    {
+      "name": "Extract FLAC Audio",
+      "description": "Download and convert media to FLAC using ffmpeg for lossless quality",
+      "command": "yt-dlp -x --audio-format flac --audio-quality 0 <URL>"
+    },
+    {
+      "name": "Extract WAV Audio",
+      "description": "Uncompressed raw PCM, massive size, pristine quality",
+      "command": "yt-dlp -x --audio-format wav --audio-quality 0 <URL>"
+    },
+    {
+      "name": "Extract ALAC Audio",
+      "description": "Apple Lossless codec, ideal for Mac and iTunes libraries",
+      "command": "yt-dlp -x --audio-format alac --audio-quality 0 <URL>"
+    },
+    {
+      "name": "Extract MP3 Audio",
+      "description": "Standard portable format, good compression and compatibility",
+      "command": "yt-dlp -x --audio-format mp3 --audio-quality 0 <URL>"
+    },
+    {
+      "name": "Best Audio Without Conversion",
+      "description": "Downloads the original best-quality audio stream without post-processing",
+      "command": "yt-dlp -f bestaudio <URL>"
+    },
+    {
+      "name": "Download Specific Playlist Items",
+      "description": "Download select items from a playlist using index values",
+      "command": "yt-dlp --playlist-items 1,3,7-10 <URL>"
+    },
+    {
+      "name": "Auto-Split by Chapters",
+      "description": "Automatically split videos into multiple files based on chapter metadata",
+      "command": "yt-dlp --split-chapters <URL>"
+    },
+    {
+      "name": "Skip Sponsored Segments (SponsorBlock)",
+      "description": "Skips ads, intros, outros, and self-promo segments using SponsorBlock API",
+      "command": "yt-dlp --sponsorblock-mark all --sponsorblock-remove all <URL>"
+    },
+    {
+      "name": "Throttle Download Speed",
+      "description": "Limit download speed to reduce bandwidth usage",
+      "command": "yt-dlp --limit-rate 1M <URL>"
+    },
+    {
+      "name": "Concurrent Fragment Downloads",
+      "description": "Increase performance for segmented streams (HLS/DASH)",
+      "command": "yt-dlp --concurrent-fragments 4 <URL>"
+    },
+    {
+      "name": "Geo-Bypass for Region Locked Content",
+      "description": "Bypass geo-blocks using fake country info or IP region hints",
+      "command": "yt-dlp --geo-bypass --geo-bypass-country US <URL>"
+    },
+    {
+      "name": "Spoof User Agent",
+      "description": "Pretend to be a different browser/client when downloading",
+      "command": "yt-dlp --user-agent \"Mozilla/5.0 (Windows NT 10.0; Win64; x64)\" <URL>"
+    },
+    {
+      "name": "Embed Thumbnail and Metadata",
+      "description": "Attach thumbnail and metadata to the audio file (ID3 or similar)",
+      "command": "yt-dlp --embed-thumbnail --embed-metadata --add-metadata <URL>"
+    },
+    {
+      "name": "Post-Processor Args for Audio FX",
+      "description": "Run custom ffmpeg filters (e.g. audio normalization) after download",
+      "command": "yt-dlp --postprocessor-args \"ffmpeg:-af loudnorm\" <URL>"
+    },
+    {
+      "name": "Custom Output Template (Safe Filenames)",
+      "description": "Set filename format to avoid overwrites and ensure organization",
+      "command": "yt-dlp -o \"%(title)s - %(uploader)s [%(id)s].%(ext)s\" <URL>"
+    },
+    {
+      "name": "Folder Structure by Metadata",
+      "description": "Download into nested folders based on uploader/playlist/title",
+      "command": "yt-dlp -o \"~/Downloads/yt-dlp/%(uploader)s/%(playlist)s/%(title)s.%(ext)s\" <URL>"
+    },
+    {
+      "name": "Write All Metadata to Disk",
+      "description": "Save title, description, annotations, and thumbnail separately",
+      "command": "yt-dlp --write-info-json --write-thumbnail --write-description --write-annotations <URL>"
+    },
+    {
+      "name": "Update yt-dlp to Latest Version",
+      "description": "Automatically check for and install the latest version",
+      "command": "yt-dlp -U"
+    },
+    {
+      "name": "Use Browser Cookies for Auth",
+      "description": "Use existing browser session cookies to download members-only content",
+      "command": "yt-dlp --cookies-from-browser chrome <URL>"
+    },
+    {
+      "name": "Avoid Re-Downloading (Archive Mode)",
+      "description": "Skips URLs that were already downloaded, using a local archive file",
+      "command": "yt-dlp --download-archive archive.txt <URL>"
+    },
+    {
+      "name": "Verbose and Debug Logging",
+      "description": "Print full debug output and HTTP traffic",
+      "command": "yt-dlp --print-traffic --verbose <URL>"
+    },
+    {
+      "name": "Dry Run (Simulation)",
+      "description": "Show what would happen without downloading anything",
+      "command": "yt-dlp --simulate <URL>"
+    }
+  ]
+}

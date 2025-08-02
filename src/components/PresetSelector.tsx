@@ -222,7 +222,7 @@ const PresetSelector: React.FC<PresetSelectorProps> = ({ onClose }) => {
         </div>
 
         {/* Content */}
-        <div className="p-6 overflow-y-auto max-h-[60vh]">
+        <div className="p-6 overflow-y-auto max-h-[40vh] preset-scrollbar">
           <AnimatePresence mode="wait">
             {activeTab === 'simple' ? (
               <motion.div

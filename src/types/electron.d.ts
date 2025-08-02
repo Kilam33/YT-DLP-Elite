@@ -29,6 +29,7 @@ export interface ElectronAPI {
   
   // System
   selectFolder: () => Promise<string | null>;
+  selectFile: (filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
   getClipboard: () => Promise<string>;
   
   // Window controls

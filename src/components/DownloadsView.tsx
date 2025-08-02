@@ -676,39 +676,45 @@ const DownloadsView: React.FC = () => {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="p-4 bg-slate-700/30 rounded-lg border border-slate-600/50"
+              className="p-6 bg-gradient-to-br from-slate-700/40 to-slate-800/40 rounded-xl border border-slate-600/50 shadow-lg"
             >
               {/* Playlist Preview */}
               {isPlaylistMetadata(metadata) ? (
                 <div>
-                  <div className="flex space-x-4 mb-4">
+                  <div className="flex space-x-4 mb-6">
                     {/* Playlist Info */}
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-white font-medium text-sm line-clamp-2 mb-1">
+                      <h3 className="text-white font-semibold text-lg line-clamp-2 mb-2">
                         📁 {metadata.title}
                       </h3>
-                      <div className="flex items-center space-x-4 text-xs text-white/60">
-                        <div className="flex items-center space-x-1">
-                          <Download className="w-3 h-3" />
-                          <span>{metadata.entries.length} videos</span>
+                      <div className="flex items-center space-x-4 text-sm text-white/70">
+                        <div className="flex items-center space-x-2 px-3 py-1 bg-lime-500/20 border border-lime-500/30 rounded-lg">
+                          <Download className="w-4 h-4 text-lime-400" />
+                          <span className="text-lime-400 font-medium">{metadata.entries.length} videos</span>
                         </div>
                       </div>
                     </div>
                   </div>
 
                   {/* Playlist Entries Preview */}
-                  <div className="max-h-40 overflow-y-auto space-y-2 mb-4">
+                  <div className="max-h-48 overflow-y-auto space-y-3 mb-6 bg-slate-800/30 rounded-lg p-4">
                     {metadata.entries.slice(0, 5).map((entry, index) => (
-                      <div key={entry.id} className="flex items-center space-x-3 p-2 bg-slate-600/30 rounded-lg">
-                        <span className="text-xs text-white/40 w-6">#{index + 1}</span>
+                      <div key={entry.id} className="flex items-center space-x-3 p-3 bg-slate-700/50 rounded-lg border border-slate-600/30 hover:bg-slate-600/50 transition-colors">
+                        <span className="text-sm text-lime-400 font-medium w-8">#{index + 1}</span>
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs text-white/80 line-clamp-1">{entry.title}</p>
-                          <div className="flex items-center space-x-2 text-xs text-white/60">
-                            <span>{entry.uploader}</span>
+                          <p className="text-sm text-white/90 line-clamp-1 font-medium">{entry.title}</p>
+                          <div className="flex items-center space-x-3 text-xs text-white/60 mt-1">
+                            <span className="flex items-center space-x-1">
+                              <User className="w-3 h-3" />
+                              <span>{entry.uploader}</span>
+                            </span>
                             {entry.duration && (
                               <>
                                 <span>•</span>
-                                <span>{formatDuration(entry.duration)}</span>
+                                <span className="flex items-center space-x-1">
+                                  <Clock className="w-3 h-3" />
+                                  <span>{formatDuration(entry.duration)}</span>
+                                </span>
                               </>
                             )}
                           </div>
@@ -716,36 +722,44 @@ const DownloadsView: React.FC = () => {
                       </div>
                     ))}
                     {metadata.entries.length > 5 && (
-                      <div className="text-xs text-white/60 text-center py-2">
+                      <div className="text-sm text-white/60 text-center py-3 bg-slate-700/30 rounded-lg">
                         ... and {metadata.entries.length - 5} more videos
                       </div>
                     )}
                   </div>
 
                   {/* Quality and Output Selection */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Quality Selection */}
                     <div>
-                      <label className="block text-sm font-medium text-white/80 mb-2">
-                        Quality
+                      <label className="block text-sm font-semibold text-white/90 mb-3">
+                        Quality Selection
                       </label>
-                      <select
-                        value={quality}
-                        onChange={(e) => setQuality(e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-lime-500 transition-colors"
-                      >
-                        {!isPlaylistMetadata(metadata) ? getAvailableQualities((metadata as VideoMetadata).formats || []).map(q => (
-                          <option key={q} value={q}>{q}</option>
-                        )) : (
-                          <option value="">No quality options for playlists</option>
-                        )}
-                      </select>
+                      <div className="relative">
+                        <select
+                          value={quality}
+                          onChange={(e) => setQuality(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-700/70 border border-slate-600/50 rounded-lg text-lime-400 focus:outline-none focus:border-lime-500 focus:ring-2 focus:ring-lime-500/20 transition-all duration-200 appearance-none cursor-pointer hover:bg-slate-600/70 [text-shadow:0_0_8px_rgba(132,204,22,0.6)]"
+                        >
+                          <option value="" className="text-white/60">Select quality...</option>
+                          {!isPlaylistMetadata(metadata) ? getAvailableQualities((metadata as VideoMetadata).formats || []).map(q => (
+                            <option key={q} value={q} className="text-lime-400 bg-slate-700">{q}</option>
+                          )) : (
+                            <option value="" className="text-white/60">No quality options for playlists</option>
+                          )}
+                        </select>
+                        <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                          <svg className="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </div>
+                      </div>
                     </div>
 
                     {/* Output Path */}
                     <div>
-                      <label className="block text-sm font-medium text-white/80 mb-2">
-                        Output Folder (Optional)
+                      <label className="block text-sm font-semibold text-white/90 mb-3">
+                        Output Folder
                       </label>
                       <div className="relative">
                         <input
@@ -753,11 +767,11 @@ const DownloadsView: React.FC = () => {
                           value={outputPath}
                           onChange={(e) => setOutputPath(e.target.value)}
                           placeholder={settings.outputPath || 'Default downloads folder'}
-                          className="w-full px-3 py-2 pr-10 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-white/40 focus:outline-none focus:border-lime-500 transition-colors"
+                          className="w-full px-4 py-3 pr-12 bg-slate-700/70 border border-slate-600/50 rounded-lg text-lime-400 placeholder-white/40 focus:outline-none focus:border-lime-500 focus:ring-2 focus:ring-lime-500/20 transition-all duration-200 hover:bg-slate-600/70 shadow-[0_0_0_1px_rgba(132,204,22,0.1)] focus:shadow-[0_0_20px_rgba(132,204,22,0.3)] [text-shadow:0_0_8px_rgba(132,204,22,0.6)]"
                         />
                         <button
                           onClick={handleSelectFolder}
-                          className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+                          className="absolute right-2 top-1/2 transform -translate-y-1/2 p-2 rounded-lg hover:bg-lime-500/20 text-white/60 hover:text-lime-400 transition-colors"
                           title="Select folder"
                           type="button"
                         >
@@ -768,11 +782,11 @@ const DownloadsView: React.FC = () => {
                   </div>
 
                   {/* Action Buttons */}
-                  <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-600/50">
+                  <div className="flex items-center justify-end space-x-3 pt-6 border-t border-slate-600/50">
                     <button
                       onClick={handleAddPlaylistToQueue}
                       disabled={isAddingDownload || isStartingDownload}
-                      className="px-4 py-2 rounded-lg bg-slate-600/50 hover:bg-slate-500/50 text-white/80 hover:text-white transition-colors flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-6 py-3 rounded-lg bg-slate-600/50 hover:bg-slate-500/50 text-white/90 hover:text-white transition-all duration-200 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed border border-slate-500/30 hover:border-slate-400/50"
                     >
                       {isAddingDownload ? (
                         <>
@@ -791,66 +805,86 @@ const DownloadsView: React.FC = () => {
               ) : (
                 /* Single Video Preview */
                 <div>
-                  <div className="flex space-x-4 mb-4">
-                    {/* Thumbnail */}
+                  <div className="flex space-x-6 mb-6">
+                    {/* Enhanced Thumbnail */}
                     <div className="flex-shrink-0">
-                      <img 
-                        src={metadata.thumbnail} 
-                        alt={metadata.title}
-                        className="w-20 h-12 object-cover rounded-lg"
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                        }}
-                      />
-                    </div>
-                    
-                    {/* Video Info */}
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-white font-medium text-sm line-clamp-2 mb-1">
-                        {metadata.title}
-                      </h3>
-                      <div className="flex items-center space-x-4 text-xs text-white/60">
-                        <div className="flex items-center space-x-1">
-                          <User className="w-3 h-3" />
-                          <span>{metadata.uploader}</span>
-                        </div>
-                        <div className="flex items-center space-x-1">
-                          <Clock className="w-3 h-3" />
-                          <span>{formatDuration(metadata.duration)}</span>
-                        </div>
-                        <div className="flex items-center space-x-1">
-                          <Eye className="w-3 h-3" />
-                          <span>{metadata.view_count?.toLocaleString() || 'N/A'}</span>
+                      <div className="relative group">
+                        <img 
+                          src={metadata.thumbnail} 
+                          alt={metadata.title}
+                          className="w-32 h-20 object-cover rounded-xl shadow-lg border border-slate-600/50 group-hover:scale-105 transition-transform duration-200"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                          }}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
+                        <div className="absolute bottom-2 left-2 right-2">
+                          <div className="flex items-center justify-center w-8 h-8 bg-lime-500/90 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                            <Play className="w-4 h-4 text-white" />
+                          </div>
                         </div>
                       </div>
+                    </div>
+                    
+                    {/* Enhanced Video Info */}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-white font-bold text-lg line-clamp-2 mb-3 leading-tight">
+                        {metadata.title}
+                      </h3>
+                      <div className="flex items-center space-x-4 text-sm text-white/70 mb-3">
+                        <div className="flex items-center space-x-2 px-3 py-1 bg-slate-700/50 rounded-lg border border-slate-600/30">
+                          <User className="w-4 h-4 text-lime-400" />
+                          <span className="text-lime-400 font-medium">{metadata.uploader}</span>
+                        </div>
+                        <div className="flex items-center space-x-2 px-3 py-1 bg-slate-700/50 rounded-lg border border-slate-600/30">
+                          <Clock className="w-4 h-4 text-lime-400" />
+                          <span className="text-lime-400 font-medium">{formatDuration(metadata.duration)}</span>
+                        </div>
+                        <div className="flex items-center space-x-2 px-3 py-1 bg-slate-700/50 rounded-lg border border-slate-600/30">
+                          <Eye className="w-4 h-4 text-lime-400" />
+                          <span className="text-lime-400 font-medium">{metadata.view_count?.toLocaleString() || 'N/A'}</span>
+                        </div>
+                      </div>
+                      {metadata.description && (
+                        <p className="text-sm text-white/60 line-clamp-2">
+                          {metadata.description}
+                        </p>
+                      )}
                     </div>
                   </div>
 
                   {/* Quality and Output Selection */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Quality Selection */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Enhanced Quality Selection */}
                     <div>
-                      <label className="block text-sm font-medium text-white/80 mb-2">
-                        Quality
+                      <label className="block text-sm font-semibold text-white/90 mb-3">
+                        Quality Selection
                       </label>
-                      <select
-                        value={quality}
-                        onChange={(e) => setQuality(e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-lime-500 transition-colors"
-                      >
-                        <option value="">Select quality...</option>
-                        {!isPlaylistMetadata(metadata) ? getAvailableQualities((metadata as VideoMetadata).formats || []).map(q => (
-                          <option key={q} value={q}>{q}</option>
-                        )) : (
-                          <option value="">No quality options for playlists</option>
-                        )}
-                      </select>
+                      <div className="relative">
+                        <select
+                          value={quality}
+                          onChange={(e) => setQuality(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-700/70 border border-slate-600/50 rounded-lg text-lime-400 focus:outline-none focus:border-lime-500 focus:ring-2 focus:ring-lime-500/20 transition-all duration-200 appearance-none cursor-pointer hover:bg-slate-600/70 [text-shadow:0_0_8px_rgba(132,204,22,0.6)]"
+                        >
+                          <option value="" className="text-white/60">Select quality...</option>
+                          {!isPlaylistMetadata(metadata) ? getAvailableQualities((metadata as VideoMetadata).formats || []).map(q => (
+                            <option key={q} value={q} className="text-lime-400 bg-slate-700">{q}</option>
+                          )) : (
+                            <option value="" className="text-white/60">No quality options for playlists</option>
+                          )}
+                        </select>
+                        <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                          <svg className="w-4 h-4 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Output Path */}
+                    {/* Enhanced Output Path */}
                     <div>
-                      <label className="block text-sm font-medium text-white/80 mb-2">
-                        Output Folder (Optional)
+                      <label className="block text-sm font-semibold text-white/90 mb-3">
+                        Output Folder
                       </label>
                       <div className="relative">
                         <input
@@ -858,11 +892,11 @@ const DownloadsView: React.FC = () => {
                           value={outputPath}
                           onChange={(e) => setOutputPath(e.target.value)}
                           placeholder={settings.outputPath || 'Default downloads folder'}
-                          className="w-full px-3 py-2 pr-10 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-white/40 focus:outline-none focus:border-lime-500 transition-colors"
+                          className="w-full px-4 py-3 pr-12 bg-slate-700/70 border border-slate-600/50 rounded-lg text-lime-400 placeholder-white/40 focus:outline-none focus:border-lime-500 focus:ring-2 focus:ring-lime-500/20 transition-all duration-200 hover:bg-slate-600/70 shadow-[0_0_0_1px_rgba(132,204,22,0.1)] focus:shadow-[0_0_20px_rgba(132,204,22,0.3)] [text-shadow:0_0_8px_rgba(132,204,22,0.6)]"
                         />
                         <button
                           onClick={handleSelectFolder}
-                          className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+                          className="absolute right-2 top-1/2 transform -translate-y-1/2 p-2 rounded-lg hover:bg-lime-500/20 text-white/60 hover:text-lime-400 transition-colors"
                           title="Select folder"
                           type="button"
                         >
@@ -872,12 +906,12 @@ const DownloadsView: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Action Buttons */}
-                  <div className="flex items-center justify-end space-x-3 mt-4 pt-4 border-t border-slate-600/50">
+                  {/* Enhanced Action Buttons */}
+                  <div className="flex items-center justify-end space-x-3 mt-6 pt-6 border-t border-slate-600/50">
                     <button
                       onClick={handleAddToQueue}
                       disabled={isAddingDownload || isStartingDownload}
-                      className="px-4 py-2 rounded-lg bg-slate-600/50 hover:bg-slate-500/50 text-white/80 hover:text-white transition-colors flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-6 py-3 rounded-lg bg-slate-600/50 hover:bg-slate-500/50 text-white/90 hover:text-white transition-all duration-200 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed border border-slate-500/30 hover:border-slate-400/50"
                     >
                       {isAddingDownload ? (
                         <>
@@ -895,7 +929,7 @@ const DownloadsView: React.FC = () => {
                     <button
                       onClick={handleStartDownload}
                       disabled={isStartingDownload || isAddingDownload}
-                      className="px-6 py-2 rounded-lg bg-gradient-to-r from-lime-500 to-lime-600 hover:from-lime-600 hover:to-lime-700 text-white font-medium transition-all duration-200 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-8 py-3 rounded-lg bg-gradient-to-r from-lime-500 to-lime-600 hover:from-lime-600 hover:to-lime-700 text-white font-semibold transition-all duration-200 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl hover:shadow-lime-500/25"
                     >
                       {isStartingDownload ? (
                         <>

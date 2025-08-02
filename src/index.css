@@ -40,6 +40,25 @@
   background: rgba(99, 102, 241, 0.5);
 }
 
+/* Preset selector specific scrollbar */
+.preset-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.preset-scrollbar::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 4px;
+}
+
+.preset-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(132, 204, 22, 0.6);
+  border-radius: 4px;
+}
+
+.preset-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(132, 204, 22, 0.8);
+}
+
 /* Custom styles for electron title bar */
 .drag-region {
   -webkit-app-region: drag;

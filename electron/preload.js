@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // System
   selectFolder: () => ipcRenderer.invoke('select-folder'),
+  selectFile: (filters) => ipcRenderer.invoke('select-file', filters),
   getClipboard: () => ipcRenderer.invoke('get-clipboard'),
   
   // Window controls

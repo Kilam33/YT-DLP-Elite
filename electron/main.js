@@ -29,6 +29,55 @@ let settings = {
   writeThumbnail: false,
   writeDescription: false,
   writeInfoJson: false,
+  verboseLogging: false,
+  
+  // Advanced Queue Settings
+  queueProcessingDelay: 1000,
+  maxRetriesPerDownload: 3,
+  autoRetryFailed: false,
+  
+  // File Management
+  maxFileSize: 0,
+  skipExistingFiles: true,
+  createSubdirectories: false,
+  
+  // Network & Performance
+  connectionTimeout: 30,
+  socketTimeout: 60,
+  maxDownloadsPerHour: 0,
+  
+  // Authentication & Cookies
+  useCookies: false,
+  cookiesFilePath: '',
+  userAgent: '',
+  
+  // Proxy Settings
+  useProxy: false,
+  proxyUrl: '',
+  proxyUsername: '',
+  proxyPassword: '',
+  
+  // Advanced yt-dlp Options
+  extractAudioFormat: 'mp3',
+  videoFormat: 'mp4',
+  audioQuality: 'best',
+  videoQuality: 'best',
+  
+  // Metadata & Info
+  writePlaylistInfo: false,
+  writeAnnotations: false,
+  writeComments: false,
+  
+  // Processing Options
+  postProcessors: '',
+  mergeVideoFormats: true,
+  preferFreeFormats: true,
+  
+  // Debug & Development
+  enableDebugMode: false,
+  logLevel: 'info',
+  saveLogsToFile: false,
+  logsDirectory: '',
 };
 
 // Settings file path
@@ -550,6 +599,14 @@ ipcMain.handle('get-metadata', async (event, url) => {
 ipcMain.handle('select-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory']
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle('select-file', async (event, filters = []) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: filters.length > 0 ? filters : undefined
   });
   return result.canceled ? null : result.filePaths[0];
 });
