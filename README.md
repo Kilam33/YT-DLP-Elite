@@ -17,7 +17,6 @@ A professional-grade desktop application for downloading videos, audio, and play
 
 ### 🎛️ Download Presets
 Quick action buttons for common download scenarios:
-- **Standard** - Best quality video + audio
 - **Video Only** - Video without audio (for editing)
 - **Audio Only** - Extract audio (MP3 format)
 - **Music Enhanced** - Audio with embedded thumbnails
@@ -101,7 +100,6 @@ Quick action buttons for common download scenarios:
 
 Use the quick action buttons in the sidebar:
 
-- **📹 Standard** - Best quality video + audio
 - **🎬 Video Only** - Video without audio (for editing)
 - **🎵 Audio Only** - Extract audio as MP3
 - **🎼 Music Enhanced** - Audio with embedded thumbnails

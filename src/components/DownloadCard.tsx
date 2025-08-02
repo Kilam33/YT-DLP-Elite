@@ -1,6 +1,7 @@
 import React from 'react';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { Download } from '../store/slices/downloadsSlice';
+import { RootState } from '../store/store';
 import { openMetadataModal } from '../store/slices/uiSlice';
 import { 
   Play, 
@@ -12,10 +13,19 @@ import {
   Clock,
   Download as DownloadIcon,
   Info,
-  ExternalLink
+  ExternalLink,
+  FolderOpen,
+  Settings,
+  Zap,
+  Music,
+  Video,
+  Subtitles,
+  FileText
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { formatFileSize, formatDuration, formatSpeed } from '../utils/format';
+import { findPresetByArgs, findPresetById } from '../config/presets';
+import toast from 'react-hot-toast';
 
 interface DownloadCardProps {
   download: Download;
@@ -33,6 +43,10 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
   onRemove,
 }) => {
   const dispatch = useDispatch();
+  const settings = useSelector((state: RootState) => state.settings.data);
+
+  // Find the active preset based on current settings
+  const activePreset = settings.customYtDlpArgs ? findPresetByArgs(settings.customYtDlpArgs) : findPresetById('default-mp4');
 
   const getStatusIcon = () => {
     switch (download.status) {
@@ -98,6 +112,36 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
     }
   };
 
+  const getQualityIcon = () => {
+    if (download.quality === 'audio') {
+      return <Music className="w-3 h-3" />;
+    }
+    return <Video className="w-3 h-3" />;
+  };
+
+  const getPresetIcon = () => {
+    if (!activePreset) return <Settings className="w-3 h-3" />;
+    
+    switch (activePreset.id) {
+      case 'audio-only':
+      case 'music-enhanced':
+      case 'flac-lossless':
+      case 'wav-uncompressed':
+      case 'alac-apple':
+      case 'mp3-portable':
+      case 'original-audio':
+        return <Music className="w-3 h-3" />;
+      case 'with-subtitles':
+        return <Subtitles className="w-3 h-3" />;
+      case 'with-metadata':
+      case 'embed-metadata':
+      case 'write-metadata-files':
+        return <FileText className="w-3 h-3" />;
+      default:
+        return <Video className="w-3 h-3" />;
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -126,6 +170,12 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
                 </span>
               )}
             </div>
+            {download.status === 'pending' && (
+              <div className="flex items-center space-x-2 mt-1">
+                <Clock className="w-3 h-3 text-white/40" />
+                <span className="text-xs text-white/40">Queued for download</span>
+              </div>
+            )}
           </div>
         </div>
         
@@ -147,6 +197,58 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
             title="Open URL"
           >
             <ExternalLink className="w-4 h-4" />
+          </button>
+          
+          {/* Show yt-dlp command for power users */}
+          <button
+            onClick={() => {
+              const args = [
+                '--newline',
+                '--progress-template', 'download:[%(progress._percent_str)s] %(progress._speed_str)s ETA %(progress._eta_str)s downloaded %(progress._downloaded_bytes_str)s of %(progress._total_bytes_str)s',
+                '--output', `${download.outputPath}/${settings.fileNamingTemplate}`,
+                '--no-playlist',
+                '--no-warnings',
+              ];
+              
+              if (settings.customYtDlpArgs.trim()) {
+                const customArgs = settings.customYtDlpArgs.trim().split(/\s+/).filter(arg => arg.length > 0);
+                args.push(...customArgs);
+              }
+              
+              if (settings.keepOriginalFiles) args.push('--keep-video');
+              if (settings.writeSubtitles) args.push('--write-subs');
+              if (settings.embedSubtitles) args.push('--embed-subs');
+              if (settings.writeThumbnail) args.push('--write-thumbnail');
+              if (settings.writeDescription) args.push('--write-description');
+              if (settings.writeInfoJson) args.push('--write-info-json');
+              if (settings.downloadSpeed > 0) args.push('--limit-rate', `${settings.downloadSpeed}k`);
+              
+              const hasCustomFormat = settings.customYtDlpArgs.includes('--format') || 
+                                    settings.customYtDlpArgs.includes('--extract-audio');
+              
+              if (!hasCustomFormat && download.quality && download.quality !== 'best') {
+                if (download.quality === 'audio') {
+                  args.push('--extract-audio', '--audio-format', 'mp3');
+                } else if (download.quality.includes('p')) {
+                  const height = download.quality.replace('p', '');
+                  args.push('--format', `bestvideo[height<=${height}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${height}]/best`);
+                } else {
+                  args.push('--format', download.quality);
+                }
+              } else if (!hasCustomFormat) {
+                args.push('--format', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best');
+              }
+              
+              args.push(download.url);
+              
+              const command = `yt-dlp ${args.join(' ')}`;
+              navigator.clipboard.writeText(command);
+              toast.success('Command copied to clipboard');
+            }}
+            className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+            title="Copy yt-dlp command"
+          >
+            <FileText className="w-4 h-4" />
           </button>
           
           {(download.status === 'downloading' || download.status === 'initializing' || download.status === 'connecting') && (
@@ -189,6 +291,66 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
         </div>
       </div>
 
+      {/* Download Settings */}
+      <div className="mb-3 p-3 bg-slate-800/30 rounded-lg border border-slate-700/50">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {/* Quality Setting */}
+          <div className="flex items-center space-x-2">
+            {getQualityIcon()}
+            <span className="text-xs text-white/60">Quality:</span>
+            <span className="text-xs text-lime-400 font-medium capitalize">{download.quality}</span>
+          </div>
+
+          {/* Output Path */}
+          <div className="flex items-center space-x-2">
+            <FolderOpen className="w-3 h-3 text-white/60" />
+            <span className="text-xs text-white/60">Output:</span>
+            <span className="text-xs text-lime-400 font-medium truncate" title={download.outputPath}>
+              {download.outputPath === settings.outputPath ? 'Default' : download.outputPath}
+            </span>
+          </div>
+
+          {/* Active Preset */}
+          <div className="flex items-center space-x-2">
+            {getPresetIcon()}
+            <span className="text-xs text-white/60">Preset:</span>
+            <span className="text-xs text-lime-400 font-medium">
+              {activePreset ? activePreset.name : 'Default MP4'}
+            </span>
+          </div>
+
+          {/* Speed Limit */}
+          {settings.downloadSpeed > 0 && (
+            <div className="flex items-center space-x-2">
+              <Zap className="w-3 h-3 text-white/60" />
+              <span className="text-xs text-white/60">Speed:</span>
+              <span className="text-xs text-lime-400 font-medium">
+                {settings.downloadSpeed} KB/s
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Preset Description */}
+        {activePreset && (
+          <div className="mt-2 pt-2 border-t border-slate-700/30">
+            <p className="text-xs text-white/50">{activePreset.description}</p>
+          </div>
+        )}
+
+        {/* Expected File Info */}
+        {download.metadata?.title && (
+          <div className="mt-2 pt-2 border-t border-slate-700/30">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-white/60">Expected file:</span>
+              <span className="text-xs text-lime-400 font-mono truncate max-w-48" title={`${download.metadata.title}.${download.quality === 'audio' ? 'mp3' : 'mp4'}`}>
+                {download.metadata.title}.{download.quality === 'audio' ? 'mp3' : 'mp4'}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Progress Bar */}
       {(download.status === 'downloading' || download.status === 'completed' || download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing') ? (
         <div className="mb-3">
@@ -200,9 +362,11 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
               }
             </span>
             {download.status === 'downloading' && (
-              <span className="text-xs text-white/60">
-                {formatSpeed(download.speed)} • ETA: {download.eta ? formatDuration(download.eta) : 'Calculating...'}
-              </span>
+              <div className="flex items-center space-x-4 text-xs text-white/60">
+                <span>{formatSpeed(download.speed)}</span>
+                <span>•</span>
+                <span>ETA: {download.eta ? formatDuration(download.eta) : 'Calculating...'}</span>
+              </div>
             )}
           </div>
           
@@ -218,6 +382,18 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
             </div>
           )}
           
+          {/* Completed File Info */}
+          {download.status === 'completed' && download.filename && (
+            <div className="text-xs text-white/50 mb-2">
+              <div className="flex items-center space-x-2">
+                <span>File:</span>
+                <span className="text-lime-400 font-mono truncate max-w-48" title={download.filename}>
+                  {download.filename}
+                </span>
+              </div>
+            </div>
+          )}
+
           <div className="w-full bg-slate-700/30 rounded-full h-2 overflow-hidden">
             {(download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing') ? (
               <div className="h-full bg-gradient-to-r from-blue-400 to-purple-500 rounded-full animate-pulse" />
@@ -248,6 +424,11 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
               <span>{download.metadata.view_count.toLocaleString()} views</span>
             )}
             <span className="capitalize">{download.quality}</span>
+            {download.status === 'completed' && download.startedAt && download.completedAt && (
+              <span>
+                {Math.round((new Date(download.completedAt).getTime() - new Date(download.startedAt).getTime()) / 1000)}s
+              </span>
+            )}
           </div>
           <div className="flex items-center space-x-2">
             {download.downloaded > 0 && download.filesize > 0 && download.status === 'downloading' && (

@@ -15,6 +15,7 @@ interface Settings {
   writeThumbnail: boolean;
   writeDescription: boolean;
   writeInfoJson: boolean;
+  verboseLogging: boolean; // Show all console logs or only important ones
 }
 
 interface SettingsState {
@@ -39,6 +40,7 @@ const initialState: SettingsState = {
     writeThumbnail: false,
     writeDescription: false,
     writeInfoJson: false,
+    verboseLogging: false, // Default to showing only important logs
   },
   isOpen: false,
   activeTab: 'general',

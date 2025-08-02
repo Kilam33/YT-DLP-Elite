@@ -4,6 +4,7 @@ import { RootState } from '../store/store';
 import { closeSettings, setActiveTab, updateSetting } from '../store/slices/settingsSlice';
 import { X, Settings, Download, Keyboard, FolderOpen } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import toast from 'react-hot-toast';
 
 const SettingsModal: React.FC = () => {
   const dispatch = useDispatch();
@@ -32,6 +33,107 @@ const SettingsModal: React.FC = () => {
     dispatch(updateSetting({ key, value }));
     // Save settings after updating
     await window.electronAPI?.saveSettings({ [key]: value });
+  };
+
+  const handleSaveAllSettings = async () => {
+    try {
+      // Save all current settings to the main process
+      await window.electronAPI?.saveSettings(settings);
+      // Show success feedback
+      toast.success('Settings saved successfully');
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+      toast.error('Failed to save settings');
+    }
+  };
+
+  const handleVerifySettings = async () => {
+    try {
+      const currentSettings = await window.electronAPI?.getSettings();
+      console.log('Current settings from main process:', currentSettings);
+      toast.success('Settings verified - check console for details');
+    } catch (error) {
+      console.error('Failed to verify settings:', error);
+      toast.error('Failed to verify settings');
+    }
+  };
+
+  const handleResetToDefaults = async () => {
+    try {
+      const defaultSettings = {
+        maxConcurrentDownloads: 3,
+        outputPath: '',
+        qualityPreset: 'best',
+        retryAttempts: 3,
+        downloadSpeed: 0,
+        customYtDlpArgs: '',
+        fileNamingTemplate: '%(title)s.%(ext)s',
+        autoStartDownloads: false,
+        keepOriginalFiles: false,
+        writeSubtitles: false,
+        embedSubtitles: false,
+        writeThumbnail: false,
+        writeDescription: false,
+        writeInfoJson: false,
+        verboseLogging: false,
+      };
+      
+      // Update Redux store
+      Object.entries(defaultSettings).forEach(([key, value]) => {
+        dispatch(updateSetting({ key: key as keyof typeof settings, value }));
+      });
+      
+      // Save to main process
+      await window.electronAPI?.saveSettings(defaultSettings);
+      toast.success('Settings reset to defaults');
+    } catch (error) {
+      console.error('Failed to reset settings:', error);
+      toast.error('Failed to reset settings');
+    }
+  };
+
+  const handleExportSettings = () => {
+    try {
+      const settingsData = JSON.stringify(settings, null, 2);
+      const blob = new Blob([settingsData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'yt-dlp-settings.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success('Settings exported successfully');
+    } catch (error) {
+      console.error('Failed to export settings:', error);
+      toast.error('Failed to export settings');
+    }
+  };
+
+  const handleImportSettings = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const importedSettings = JSON.parse(e.target?.result as string);
+        
+        // Update Redux store
+        Object.entries(importedSettings).forEach(([key, value]) => {
+          dispatch(updateSetting({ key: key as keyof typeof settings, value }));
+        });
+        
+        // Save to main process
+        await window.electronAPI?.saveSettings(importedSettings);
+        toast.success('Settings imported successfully');
+      } catch (error) {
+        console.error('Failed to import settings:', error);
+        toast.error('Failed to import settings');
+      }
+    };
+    reader.readAsText(file);
   };
 
   if (!isOpen) return null;
@@ -211,12 +313,33 @@ const SettingsModal: React.FC = () => {
                       <label className="block text-sm font-medium text-white/80 mb-2">
                         Custom yt-dlp Arguments
                       </label>
-                      <textarea
-                        value={settings.customYtDlpArgs}
-                        onChange={(e) => handleSettingChange('customYtDlpArgs', e.target.value)}
-                        placeholder="--write-subs --embed-subs"
-                        className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-white/40 focus:outline-none focus:border-lime-500 h-20 resize-none"
-                      />
+                      <div className="flex items-center space-x-2 mb-2">
+                        <textarea
+                          value={settings.customYtDlpArgs}
+                          onChange={(e) => handleSettingChange('customYtDlpArgs', e.target.value)}
+                          placeholder="--write-subs --embed-subs"
+                          className="flex-1 px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-white/40 focus:outline-none focus:border-lime-500 h-20 resize-none"
+                        />
+                        <button
+                          onClick={() => {
+                            handleSettingChange('customYtDlpArgs', '');
+                          }}
+                          className="px-3 py-2 bg-lime-500/20 hover:bg-lime-500/30 text-lime-400 hover:text-lime-300 border border-lime-500/30 rounded-lg transition-colors text-sm"
+                        >
+                          Use Default MP4
+                        </button>
+                      </div>
+                      {!settings.customYtDlpArgs && (
+                        <div className="p-2 bg-lime-500/20 border border-lime-500/30 rounded-lg">
+                          <p className="text-xs text-lime-300 font-medium">Default Arguments:</p>
+                          <p className="text-xs text-lime-400 font-mono mt-1">
+                            --format "bestvideo[height&lt;=QUALITY][ext=mp4]+bestaudio[ext=m4a]/best[height&lt;=QUALITY]"
+                          </p>
+                        </div>
+                      )}
+                      <p className="text-xs text-white/50">
+                        Use yt-dlp format strings like %(title)s, %(uploader)s, %(upload_date)s
+                      </p>
                     </div>
 
                     <div className="space-y-3">
@@ -302,6 +425,26 @@ const SettingsModal: React.FC = () => {
                         </div>
                       </div>
                     </div>
+
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-medium text-white/90">Logging</h4>
+                      
+                      <div className="flex items-center space-x-3">
+                        <input
+                          type="checkbox"
+                          id="verboseLogging"
+                          checked={settings.verboseLogging}
+                          onChange={(e) => handleSettingChange('verboseLogging', e.target.checked)}
+                          className="w-4 h-4 text-lime-500 bg-slate-700 border-slate-600 rounded focus:ring-lime-500"
+                        />
+                        <label htmlFor="verboseLogging" className="text-white/80 text-sm">
+                          Verbose logging (show all console logs)
+                        </label>
+                      </div>
+                      <p className="text-xs text-white/50">
+                        When enabled, all console logs will be captured. When disabled, only important logs (errors, warnings, and logs containing keywords like 'download', 'yt-dlp', 'error', etc.) will be shown.
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
@@ -331,6 +474,60 @@ const SettingsModal: React.FC = () => {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Footer with Save and Close buttons */}
+          <div className="p-6 border-t border-slate-700/50 bg-slate-900/50">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-white/60">
+                <div>Settings are automatically saved when changed</div>
+                <div className="text-xs text-white/40 mt-1">
+                  Settings file: AppData/settings.json
+                </div>
+              </div>
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={handleSaveAllSettings}
+                  className="px-4 py-2 bg-lime-500/20 hover:bg-lime-500/30 text-lime-400 hover:text-lime-300 border border-lime-500/30 rounded-lg transition-colors"
+                >
+                  Save All Settings
+                </button>
+                <button
+                  onClick={handleVerifySettings}
+                  className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 hover:text-blue-300 border border-blue-500/30 rounded-lg transition-colors"
+                >
+                  Verify Settings
+                </button>
+                <button
+                  onClick={handleResetToDefaults}
+                  className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-red-300 border border-red-500/30 rounded-lg transition-colors"
+                >
+                  Reset to Defaults
+                </button>
+                <button
+                  onClick={handleExportSettings}
+                  className="px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 hover:text-purple-300 border border-purple-500/30 rounded-lg transition-colors"
+                >
+                  Export Settings
+                </button>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportSettings}
+                  className="hidden"
+                  id="import-settings-file"
+                />
+                <label htmlFor="import-settings-file" className="px-4 py-2 bg-slate-700/50 hover:bg-slate-600/50 text-white/80 hover:text-white border border-slate-600/50 rounded-lg transition-colors cursor-pointer">
+                  Import Settings
+                </label>
+                <button
+                  onClick={() => dispatch(closeSettings())}
+                  className="px-4 py-2 bg-slate-700/50 hover:bg-slate-600/50 text-white/80 hover:text-white border border-slate-600/50 rounded-lg transition-colors"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </motion.div>

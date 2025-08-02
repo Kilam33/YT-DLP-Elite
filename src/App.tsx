@@ -8,9 +8,12 @@ import TitleBar from './components/TitleBar';
 import Sidebar from './components/Sidebar';
 import MainContent from './components/MainContent';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useSettings } from './hooks/useSettings';
+import './utils/logger'; // Initialize logger
 
 const AppContent: React.FC = () => {
   useKeyboardShortcuts();
+  useSettings(); // Load settings on startup
 
   const handleMinimize = async () => {
     await window.electronAPI?.minimizeWindow();

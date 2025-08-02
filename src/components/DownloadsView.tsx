@@ -23,10 +23,14 @@ import {
   Eye,
   Download as DownloadIcon,
   Plus as PlusIcon,
-  CheckCircle
+  CheckCircle,
+  Settings,
+  Music
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
+import { formatDuration } from '../utils/format';
+import { findPresetByArgs } from '../config/presets';
 
 interface VideoMetadata {
   title: string;
@@ -92,44 +96,10 @@ const DownloadsView: React.FC = () => {
         // Remove from queue if download starts
         if (download.status === 'downloading' || download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing' || download.status === 'pending') {
           dispatch(removeFromQueue(download.id));
-          dispatch(addLog({
-            level: 'info',
-            message: `Download started: ${download.metadata?.title || download.url}`,
-            downloadId: download.id,
-          }));
-        }
-
-        // Log progress updates for debugging
-        if (download.status === 'downloading' && download.progress > 0) {
-          dispatch(addLog({
-            level: 'debug',
-            message: `Progress: ${download.progress}% - ${download.metadata?.title || download.url}`,
-            downloadId: download.id,
-          }));
-        }
-
-        // Log status transitions
-        if (download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing') {
-          let statusText = 'Unknown';
-          if (download.status === 'initializing') statusText = 'Initializing';
-          else if (download.status === 'connecting') statusText = 'Connecting';
-          else if (download.status === 'processing') statusText = 'Processing';
-          
-          dispatch(addLog({
-            level: 'info',
-            message: `${statusText} download: ${download.metadata?.title || download.url}`,
-            downloadId: download.id,
-          }));
         }
 
         // Handle completed downloads with delay
         if (download.status === 'completed') {
-          dispatch(addLog({
-            level: 'info',
-            message: `Download completed: ${download.metadata?.title || download.url}`,
-            downloadId: download.id,
-          }));
-          
           // Keep completed downloads visible for a moment before moving to history
           setTimeout(() => {
             // The download will automatically move to history view
@@ -173,10 +143,6 @@ const DownloadsView: React.FC = () => {
       if (window.electronAPI) {
         const downloadsData = await window.electronAPI.getDownloads();
         dispatch(setDownloads(downloadsData));
-        dispatch(addLog({
-          level: 'info',
-          message: `Loaded ${downloadsData.length} downloads`,
-        }));
       }
     } catch (error) {
       console.error('Failed to load downloads:', error);
@@ -237,11 +203,13 @@ const DownloadsView: React.FC = () => {
       if (data) {
         setMetadata(data);
         setShowPreview(true);
+        
         // Set default quality to highest available
         const qualities = getAvailableQualities(data.formats || []);
         if (qualities.length > 0) {
           setQuality(qualities[0]);
         }
+        
         dispatch(addLog({
           level: 'info',
           message: `Fetched metadata for: ${data.title}`,
@@ -436,12 +404,17 @@ const DownloadsView: React.FC = () => {
       return;
     }
 
+    if (!quality.trim()) {
+      toast.error('Please select a quality');
+      return;
+    }
+
     setIsStartingDownload(true);
     
     try {
       const downloadOptions = {
-        quality,
         outputPath: outputPath || settings.outputPath,
+        quality: quality,
       };
       
       const download = await window.electronAPI?.addDownload(url.trim(), downloadOptions);
@@ -453,11 +426,6 @@ const DownloadsView: React.FC = () => {
         const started = await window.electronAPI?.startDownload(download.id);
         if (started) {
           toast.success('Download started successfully');
-          dispatch(addLog({
-            level: 'info',
-            message: `Download started: ${metadata.title} (${quality})`,
-            downloadId: download.id,
-          }));
         } else {
           toast.error('Failed to start download');
           dispatch(addLog({
@@ -492,12 +460,17 @@ const DownloadsView: React.FC = () => {
       return;
     }
 
+    if (!quality.trim()) {
+      toast.error('Please select a quality');
+      return;
+    }
+
     setIsAddingDownload(true);
     
     try {
       const downloadOptions = {
-        quality,
         outputPath: outputPath || settings.outputPath,
+        quality: quality,
       };
       
       const download = await window.electronAPI?.addDownload(url.trim(), downloadOptions);
@@ -607,7 +580,25 @@ const DownloadsView: React.FC = () => {
       {/* Header */}
       <div className="p-6 border-b border-slate-700/50 flex-shrink-0">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-white">Downloads</h1>
+          <div className="flex items-center space-x-4">
+            <h1 className="text-2xl font-bold text-white">Downloads</h1>
+            {settings.customYtDlpArgs && (
+              <div className="flex items-center space-x-2 px-3 py-1 bg-lime-500/20 border border-lime-500/30 rounded-lg">
+                <Settings className="w-4 h-4 text-lime-400" />
+                <span className="text-sm text-lime-400 font-medium">
+                  {findPresetByArgs(settings.customYtDlpArgs)?.name || 'Custom Preset'}
+                </span>
+              </div>
+            )}
+            {!settings.customYtDlpArgs && (
+              <div className="flex items-center space-x-2 px-3 py-1 bg-lime-500/20 border border-lime-500/30 rounded-lg">
+                <Settings className="w-4 h-4 text-lime-400" />
+                <span className="text-sm text-lime-400 font-medium">
+                  Default MP4 Preset Active
+                </span>
+              </div>
+            )}
+          </div>
           {activeDownloads.length > 0 && (
             <button
               onClick={handleClearCompleted}
@@ -731,27 +722,48 @@ const DownloadsView: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Output Path */}
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-white/80 mb-2">
-                      Output Folder (Optional)
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={outputPath}
-                        onChange={(e) => setOutputPath(e.target.value)}
-                        placeholder={settings.outputPath || 'Default downloads folder'}
-                        className="w-full px-3 py-2 pr-10 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-white/40 focus:outline-none focus:border-lime-500 transition-colors"
-                      />
-                      <button
-                        onClick={handleSelectFolder}
-                        className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
-                        title="Select folder"
-                        type="button"
+                  {/* Quality and Output Selection */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Quality Selection */}
+                    <div>
+                      <label className="block text-sm font-medium text-white/80 mb-2">
+                        Quality
+                      </label>
+                      <select
+                        value={quality}
+                        onChange={(e) => setQuality(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-lime-500 transition-colors"
                       >
-                        <FolderOpen className="w-4 h-4" />
-                      </button>
+                        {!isPlaylistMetadata(metadata) ? getAvailableQualities((metadata as VideoMetadata).formats || []).map(q => (
+                          <option key={q} value={q}>{q}</option>
+                        )) : (
+                          <option value="">No quality options for playlists</option>
+                        )}
+                      </select>
+                    </div>
+
+                    {/* Output Path */}
+                    <div>
+                      <label className="block text-sm font-medium text-white/80 mb-2">
+                        Output Folder (Optional)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={outputPath}
+                          onChange={(e) => setOutputPath(e.target.value)}
+                          placeholder={settings.outputPath || 'Default downloads folder'}
+                          className="w-full px-3 py-2 pr-10 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-white/40 focus:outline-none focus:border-lime-500 transition-colors"
+                        />
+                        <button
+                          onClick={handleSelectFolder}
+                          className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+                          title="Select folder"
+                          type="button"
+                        >
+                          <FolderOpen className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -826,9 +838,12 @@ const DownloadsView: React.FC = () => {
                         onChange={(e) => setQuality(e.target.value)}
                         className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-lime-500 transition-colors"
                       >
-                        {getAvailableQualities(metadata.formats || []).map(q => (
+                        <option value="">Select quality...</option>
+                        {!isPlaylistMetadata(metadata) ? getAvailableQualities((metadata as VideoMetadata).formats || []).map(q => (
                           <option key={q} value={q}>{q}</option>
-                        ))}
+                        )) : (
+                          <option value="">No quality options for playlists</option>
+                        )}
                       </select>
                     </div>
 

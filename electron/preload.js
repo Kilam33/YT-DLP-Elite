@@ -44,5 +44,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   removeDownloadUpdateListener: () => {
     ipcRenderer.removeAllListeners('download-updated');
+  },
+  onLogAdded: (callback) => {
+    ipcRenderer.on('log-added', (event, logData) => callback(logData));
+  },
+  removeLogAddedListener: () => {
+    ipcRenderer.removeAllListeners('log-added');
   }
 });

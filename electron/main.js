@@ -1,9 +1,13 @@
-const { app, BrowserWindow, ipcMain, dialog, clipboard, shell } = require('electron');
-const path = require('path');
-const fs = require('fs').promises;
-const fsSync = require('fs');
-const { spawn } = require('child_process');
+import { app, BrowserWindow, ipcMain, dialog, clipboard, shell } from 'electron';
+import path from 'path';
+import fs from 'fs/promises';
+import fsSync from 'fs';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 
+// ES module equivalent of __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -37,6 +41,7 @@ async function loadSettings() {
       const data = await fs.readFile(settingsPath, 'utf8');
       const loadedSettings = JSON.parse(data);
       settings = { ...settings, ...loadedSettings };
+      console.log('Loaded settings:', settings);
     }
   } catch (error) {
     console.error('Failed to load settings:', error);
@@ -47,6 +52,7 @@ async function loadSettings() {
 async function saveSettings() {
   try {
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+    console.log('Saved settings:', settings);
   } catch (error) {
     console.error('Failed to save settings:', error);
   }
@@ -59,7 +65,6 @@ async function createWindow() {
     height: 900,
     minWidth: 1200,
     minHeight: 700,
-    icon: path.join(__dirname, '../resources/icon.svg'),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -122,13 +127,16 @@ async function createWindow() {
 // Check if yt-dlp is available
 async function checkYtDlp() {
   return new Promise((resolve) => {
+    console.log('Checking yt-dlp availability...');
     const ytDlp = spawn('yt-dlp', ['--version']);
     
     ytDlp.on('close', (code) => {
+      console.log(`yt-dlp check result: ${code === 0 ? 'available' : 'not available'} (exit code: ${code})`);
       resolve(code === 0);
     });
     
-    ytDlp.on('error', () => {
+    ytDlp.on('error', (error) => {
+      console.log(`yt-dlp spawn error:`, error.message);
       resolve(false);
     });
   });
@@ -137,13 +145,16 @@ async function checkYtDlp() {
 // Check if ffmpeg is available
 async function checkFfmpeg() {
   return new Promise((resolve) => {
+    console.log('Checking ffmpeg availability...');
     const ffmpeg = spawn('ffmpeg', ['-version']);
     
     ffmpeg.on('close', (code) => {
+      console.log(`ffmpeg check result: ${code === 0 ? 'available' : 'not available'} (exit code: ${code})`);
       resolve(code === 0);
     });
     
-    ffmpeg.on('error', () => {
+    ffmpeg.on('error', (error) => {
+      console.log(`ffmpeg spawn error:`, error.message);
       resolve(false);
     });
   });
@@ -206,13 +217,25 @@ ipcMain.handle('get-settings', () => settings);
 
 ipcMain.handle('update-settings', (event, newSettings) => {
   settings = { ...settings, ...newSettings };
+  console.log('Settings updated via IPC:', newSettings);
   return settings;
 });
 
 ipcMain.handle('save-settings', async (event, newSettings) => {
+  // Merge new settings with existing settings
   settings = { ...settings, ...newSettings };
+  console.log('Settings saved via IPC:', newSettings);
+  console.log('All settings after merge:', settings);
   await saveSettings();
   return settings;
+});
+
+// Add log handler to send logs from main process to renderer
+ipcMain.handle('add-log', (event, logData) => {
+  if (mainWindow) {
+    mainWindow.webContents.send('log-added', logData);
+  }
+  return true;
 });
 
 ipcMain.handle('add-download', async (event, url, options = {}) => {
@@ -274,7 +297,7 @@ ipcMain.handle('add-download', async (event, url, options = {}) => {
     filename: '',
     filesize: 0,
     downloaded: 0,
-    quality: options.quality || settings.qualityPreset,
+    quality: options.quality || null,
     outputPath: options.outputPath || settings.outputPath,
     addedAt: new Date(),
     metadata: metadata,
@@ -301,7 +324,7 @@ ipcMain.handle('add-playlist-videos', async (event, playlistData) => {
     const download = {
       id,
       url: entry.url,
-      quality: playlistData.quality || settings.qualityPreset,
+      quality: playlistData.quality || 'best',
       outputPath: playlistData.outputPath || settings.outputPath,
       status: 'pending',
       progress: 0,
@@ -576,6 +599,17 @@ async function processQueue() {
   // Start actual download process
   simulateDownload(nextId);
   
+  // Log the start of download processing
+  if (mainWindow) {
+    mainWindow.webContents.send('log-added', {
+      level: 'info',
+      message: `Started processing download: ${download.url}`,
+      source: 'electron',
+      downloadId: nextId,
+      data: { url: download.url, quality: download.quality }
+    });
+  }
+  
   // Continue processing queue
   setTimeout(processQueue, 1000);
 }
@@ -616,7 +650,9 @@ function simulateDownload(id) {
 
   // Add custom arguments if specified
   if (settings.customYtDlpArgs.trim()) {
-    args.push(...settings.customYtDlpArgs.trim().split(' '));
+    // Split the arguments properly and filter out empty strings
+    const customArgs = settings.customYtDlpArgs.trim().split(/\s+/).filter(arg => arg.length > 0);
+    args.push(...customArgs);
   }
 
   // Add additional options based on settings
@@ -649,28 +685,65 @@ function simulateDownload(id) {
     args.push('--limit-rate', `${settings.downloadSpeed}k`);
   }
 
-  args.push(download.url);
-
-  // Add format selection if specified
-  if (download.quality && download.quality !== 'best') {
+  // Add format selection based on user quality selection or preset
+  if (settings.customYtDlpArgs.trim()) {
+    // Check if preset arguments contain quality substitution
+    let presetArgs = settings.customYtDlpArgs;
+    if (presetArgs.includes('${quality}') && download.quality) {
+      // Replace ${quality} with the actual quality value
+      if (download.quality.includes('p')) {
+        const height = download.quality.replace('p', '');
+        presetArgs = presetArgs.replace(/\$\{quality\}/g, height);
+      } else {
+        presetArgs = presetArgs.replace(/\$\{quality\}/g, download.quality);
+      }
+      
+      // Split the arguments and add them
+      const customArgs = presetArgs.trim().split(/\s+/).filter(arg => arg.length > 0);
+      args.push(...customArgs);
+    } else {
+      // Add preset arguments as-is
+      const customArgs = settings.customYtDlpArgs.trim().split(/\s+/).filter(arg => arg.length > 0);
+      args.push(...customArgs);
+    }
+  } else if (download.quality && download.quality.trim()) {
+    // Use user-selected quality from GUI when no custom preset is active
     if (download.quality === 'audio') {
-      args.splice(-1, 0, '--extract-audio', '--audio-format', 'mp3');
+      args.push('--extract-audio', '--audio-format', 'mp3');
+    } else if (download.quality === 'best') {
+      // For 'best' quality, use no format specification to let yt-dlp choose the best available formats
+      // This is the recommended approach according to yt-dlp documentation
     } else if (download.quality.includes('p')) {
       // For video quality like 1080p, 720p, etc.
       const height = download.quality.replace('p', '');
-      // Use more specific format selection for better quality
-      args.splice(-1, 0, '--format', `bestvideo[height<=${height}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${height}]/best`);
+      // Use the most reliable format selection for quality
+      args.push('--format', `bestvideo[height<=${height}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${height}]`);
     } else {
       // For other quality options
-      args.splice(-1, 0, '--format', download.quality);
+      args.push('--format', download.quality);
     }
-  } else {
-    // For 'best' quality, use default but ensure we get good quality
-    args.splice(-1, 0, '--format', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best');
   }
+  // Otherwise, no format arguments - let yt-dlp choose the best available format
+
+  args.push(download.url);
 
   const ytDlp = spawn('yt-dlp', args);
   download.process = ytDlp;
+
+  // Log the command for debugging
+  console.log(`yt-dlp command for download ${id}:`, 'yt-dlp', args.join(' '));
+  console.log(`Download quality: "${download.quality}"`);
+  console.log(`Custom args: "${settings.customYtDlpArgs}"`);
+  
+  // Log available formats for debugging
+  if (download.metadata && download.metadata.formats) {
+    console.log('Available formats:');
+    download.metadata.formats.forEach(format => {
+      if (format.height) {
+        console.log(`  - ${format.format_id}: ${format.height}p, ${format.ext}, vcodec: ${format.vcodec}, acodec: ${format.acodec}`);
+      }
+    });
+  }
 
   // Update status to downloading once process starts
   download.status = 'downloading';
@@ -685,7 +758,18 @@ function simulateDownload(id) {
     const lines = data.toString().split('\n');
     
     for (const line of lines) {
-      console.log(`yt-dlp output for ${id}:`, line.trim()); // Debug logging
+      // Log important yt-dlp events to the renderer
+      if (line.includes('[download]') || line.includes('[Merger]') || line.includes('[FFmpeg]')) {
+        if (mainWindow) {
+          mainWindow.webContents.send('log-added', {
+            level: 'info',
+            message: `yt-dlp: ${line.trim()}`,
+            source: 'yt-dlp',
+            downloadId: id,
+            data: { line: line.trim() }
+          });
+        }
+      }
       
       // Log all lines that might contain filename information
       if (line.includes('Destination:') || line.includes('[download]') || line.includes('.mp4') || line.includes('.mp3') || line.includes('.mkv')) {
@@ -884,6 +968,17 @@ function simulateDownload(id) {
     const error = data.toString();
     console.error(`yt-dlp error for download ${id}:`, error);
     
+    // Send error to renderer
+    if (mainWindow) {
+      mainWindow.webContents.send('log-added', {
+        level: 'error',
+        message: `yt-dlp error: ${error.trim()}`,
+        source: 'yt-dlp',
+        downloadId: id,
+        data: { error: error.trim() }
+      });
+    }
+    
     // Only treat actual ERROR lines as errors, not warnings
     if (error.includes('ERROR:')) {
       let errorMessage = error;
@@ -897,6 +992,8 @@ function simulateDownload(id) {
         errorMessage = 'This video is unavailable. It might be private, deleted, or region-restricted.';
       } else if (error.includes('Sign in to confirm your age')) {
         errorMessage = 'This video requires age verification. Please sign in to YouTube to watch this video.';
+      } else if (error.includes('Requested format is not available')) {
+        errorMessage = 'The selected format is not available for this video. Try a different preset or quality setting.';
       }
       
       download.error = errorMessage;
@@ -909,6 +1006,17 @@ function simulateDownload(id) {
     } else if (error.includes('WARNING:')) {
       // Just log warnings, don't treat as errors
       console.warn(`yt-dlp warning for download ${id}:`, error);
+      
+      // Send warning to renderer
+      if (mainWindow) {
+        mainWindow.webContents.send('log-added', {
+          level: 'warning',
+          message: `yt-dlp warning: ${error.trim()}`,
+          source: 'yt-dlp',
+          downloadId: id,
+          data: { warning: error.trim() }
+        });
+      }
     }
   });
 

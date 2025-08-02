@@ -11,6 +11,8 @@ interface UiState {
     level: 'info' | 'warning' | 'error' | 'debug';
     message: string;
     downloadId?: string;
+    source?: string;
+    data?: any;
   }>;
   logFilter: 'all' | 'info' | 'warning' | 'error' | 'debug';
 }
@@ -48,14 +50,14 @@ const uiSlice = createSlice({
     addLog: (state, action: PayloadAction<Omit<UiState['logs'][0], 'id' | 'timestamp'>>) => {
       const log = {
         ...action.payload,
-        id: Date.now().toString(),
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         timestamp: new Date().toISOString(), // Store as ISO string
       };
       state.logs.unshift(log);
       
-      // Keep only last 1000 logs
-      if (state.logs.length > 1000) {
-        state.logs = state.logs.slice(0, 1000);
+      // Keep only last 500 logs to reduce memory usage
+      if (state.logs.length > 500) {
+        state.logs = state.logs.slice(0, 500);
       }
     },
     clearLogs: (state) => {
