@@ -1058,13 +1058,14 @@ const SettingsModal: React.FC = () => {
                   <div className="bg-slate-800/20 rounded-lg p-6 border border-slate-700/30">
                     <div className="space-y-3">
                       {[
-                        { action: 'Add Download', shortcut: 'Ctrl+N' },
-                        { action: 'Settings', shortcut: 'Ctrl+S' },
-                        { action: 'Queue View', shortcut: 'Ctrl+Q' },
-                        { action: 'History View', shortcut: 'Ctrl+H' },
-                        { action: 'Logs View', shortcut: 'Ctrl+L' },
+                        { action: 'Settings', shortcut: 'Ctrl+O' },
+                        { action: 'Downloads View', shortcut: 'Ctrl+1' },
+                        { action: 'Queue View', shortcut: 'Ctrl+2' },
+                        { action: 'History View', shortcut: 'Ctrl+3' },
+                        { action: 'Logs View', shortcut: 'Ctrl+4' },
                         { action: 'Pause All', shortcut: 'Ctrl+P' },
-                        { action: 'Clear Completed', shortcut: 'Ctrl+C' },
+                        { action: 'Resume All', shortcut: 'Ctrl+U' },
+                        { action: 'Clear Completed', shortcut: 'Ctrl+X' },
                         { action: 'Retry Failed', shortcut: 'Ctrl+R' },
                       ].map(({ action, shortcut }) => (
                         <motion.div

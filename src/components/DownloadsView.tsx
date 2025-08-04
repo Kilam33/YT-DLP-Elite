@@ -34,7 +34,8 @@ import {
   Plus as PlusIcon,
   CheckCircle,
   Settings,
-  Music
+  Music,
+  X
 } from 'lucide-react';
 import { OptimizedAnimatePresence, OptimizedMotionDiv, OptimizedListContainer, OptimizedListItem } from './OptimizedAnimations';
 import VirtualizedDownloadsList from './VirtualizedDownloadsList';
@@ -107,6 +108,7 @@ const DownloadsView: React.FC = () => {
   const [metadataFetchStartTime, setMetadataFetchStartTime] = useState<number | null>(null);
   
   const urlInputRef = useRef<HTMLInputElement>(null);
+  const metadataAbortController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     loadDownloads();
@@ -345,6 +347,14 @@ const DownloadsView: React.FC = () => {
   const fetchMetadata = useCallback(async () => {
     if (!url.trim()) return;
     
+    // Cancel any ongoing metadata fetch
+    if (metadataAbortController.current) {
+      metadataAbortController.current.abort();
+    }
+    
+    // Create new AbortController for this fetch
+    metadataAbortController.current = new AbortController();
+    
     console.log('Starting metadata fetch for:', url);
     setIsLoadingMetadata(true);
     setShowPreview(false); // Hide previous preview immediately
@@ -353,6 +363,12 @@ const DownloadsView: React.FC = () => {
     try {
       console.log('Waiting for metadata response...');
       const data = await window.electronAPI?.getMetadata(url.trim());
+      
+      // Check if the request was aborted
+      if (metadataAbortController.current?.signal.aborted) {
+        console.log('Metadata fetch was cancelled');
+        return;
+      }
       
       console.log('Metadata response received:', data ? 'success' : 'null');
       
@@ -385,19 +401,26 @@ const DownloadsView: React.FC = () => {
         }));
       }
     } catch (error) {
-      console.error('Failed to fetch metadata:', error);
-      setMetadata(null);
-      setShowPreview(false);
-      
-      const errorMessage = `Failed to fetch metadata for URL: ${url}`;
+      // Don't log errors if the request was aborted
+      if (!metadataAbortController.current?.signal.aborted) {
+        console.error('Failed to fetch metadata:', error);
+        setMetadata(null);
+        setShowPreview(false);
         
-      dispatch(addLog({
-        level: 'error',
-        message: errorMessage,
-      }));
+        const errorMessage = `Failed to fetch metadata for URL: ${url}`;
+          
+        dispatch(addLog({
+          level: 'error',
+          message: errorMessage,
+        }));
+      }
     } finally {
-      setIsLoadingMetadata(false);
-      setMetadataFetchStartTime(null);
+      // Only reset loading state if the request wasn't aborted
+      if (!metadataAbortController.current?.signal.aborted) {
+        setIsLoadingMetadata(false);
+        setMetadataFetchStartTime(null);
+      }
+      metadataAbortController.current = null;
     }
   }, [url, quality, dispatch]);
 
@@ -588,6 +611,42 @@ const DownloadsView: React.FC = () => {
         level: 'error',
         message: 'Failed to read clipboard',
       }));
+    }
+  };
+
+  const handleClearUrl = () => {
+    // Cancel any ongoing metadata fetch
+    if (metadataAbortController.current) {
+      metadataAbortController.current.abort();
+      metadataAbortController.current = null;
+    }
+    
+    setUrl('');
+    setMetadata(null);
+    setShowPreview(false);
+    setQuality('');
+    setIsLoadingMetadata(false);
+    setMetadataFetchStartTime(null);
+    toast.success('URL cleared');
+  };
+
+  const handleClearPreview = () => {
+    // Keep metadata cached but hide the preview
+    setShowPreview(false);
+    setQuality('');
+    setOutputPath('');
+    toast.success('Preview cleared - metadata cached for reuse');
+  };
+
+  // Check if we can restore preview from cached metadata
+  const canRestorePreview = () => {
+    return metadata && !showPreview && url.trim() && url.trim() === (metadata as any).url;
+  };
+
+  const handleRestorePreview = () => {
+    if (canRestorePreview()) {
+      setShowPreview(true);
+      toast.success('Preview restored from cache');
     }
   };
 
@@ -920,7 +979,7 @@ const DownloadsView: React.FC = () => {
           {/* URL Input */}
           <div>
             <label className="block text-sm font-medium text-white/80 mb-2">
-              Video URL
+              Media URL
             </label>
             <div className="relative">
               <input
@@ -929,16 +988,40 @@ const DownloadsView: React.FC = () => {
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="https://youtube.com/watch?v=..."
-                className="w-full px-4 py-3 pr-12 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-white/40 focus:outline-none focus:border-lime-500 transition-colors"
+                className="w-full px-4 py-3 pr-20 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-white/40 focus:outline-none focus:border-lime-500 transition-colors"
               />
-              <button
-                onClick={handlePasteFromClipboard}
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 p-2 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
-                title="Paste from clipboard"
-              >
-                <Clipboard className="w-4 h-4" />
-              </button>
+              <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center space-x-1">
+                {url && (
+                  <button
+                    onClick={handleClearUrl}
+                    className="p-2 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+                    title="Clear URL"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+                <button
+                  onClick={handlePasteFromClipboard}
+                  className="p-2 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+                  title="Paste from clipboard"
+                >
+                  <Clipboard className="w-4 h-4" />
+                </button>
+              </div>
             </div>
+            
+            {/* Restore Preview Button */}
+            {canRestorePreview() && (
+              <div className="mt-2">
+                <button
+                  onClick={handleRestorePreview}
+                  className="flex items-center space-x-2 px-3 py-2 bg-lime-500/20 hover:bg-lime-500/30 text-lime-400 hover:text-lime-300 border border-lime-500/30 rounded-lg transition-all duration-200"
+                >
+                  <Eye className="w-4 h-4" />
+                  <span className="text-sm font-medium">Restore Preview from Cache</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Metadata Preview */}
@@ -998,6 +1081,15 @@ const DownloadsView: React.FC = () => {
                         </div>
                       </div>
                     </div>
+                    {/* Clear Preview Button */}
+                    <button
+                      onClick={handleClearPreview}
+                      className="flex items-center space-x-2 px-3 py-2 bg-slate-600/50 hover:bg-slate-500/50 text-white/80 hover:text-white border border-slate-500/30 hover:border-slate-400/50 rounded-lg transition-all duration-200"
+                      title="Clear preview (metadata cached)"
+                    >
+                      <X className="w-4 h-4" />
+                      <span className="text-sm font-medium">Clear</span>
+                    </button>
                   </div>
 
                   {/* Playlist Entries Preview */}
@@ -1204,6 +1296,16 @@ const DownloadsView: React.FC = () => {
                         </p>
                       )}
                     </div>
+                    
+                    {/* Clear Preview Button */}
+                    <button
+                      onClick={handleClearPreview}
+                      className="flex items-center space-x-2 px-3 py-2 bg-slate-600/50 hover:bg-slate-500/50 text-white/80 hover:text-white border border-slate-500/30 hover:border-slate-400/50 rounded-lg transition-all duration-200 self-start"
+                      title="Clear preview (metadata cached)"
+                    >
+                      <X className="w-4 h-4" />
+                      <span className="text-sm font-medium">Clear</span>
+                    </button>
                   </div>
 
                   {/* Quality and Output Selection */}

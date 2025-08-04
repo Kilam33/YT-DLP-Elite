@@ -1,11 +1,13 @@
 import React from 'react';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store/store';
-import { LazyDownloadsView, LazyHistoryView, LazyQueueView, LazyLogsView, LazySettingsModal, LazyMetadataModal } from './LazyViews';
+import { LazyDownloadsView, LazyHistoryView, LazyQueueView, LazyLogsView, LazyMetadataModal } from './LazyViews';
+import SettingsModal from './SettingsModal';
 
 const MainContent: React.FC = () => {
   const activeView = useSelector((state: RootState) => state.ui.activeView);
-  const { isSettingsOpen, isMetadataOpen, selectedMetadata } = useSelector((state: RootState) => state.ui);
+  const { isMetadataOpen, selectedMetadata } = useSelector((state: RootState) => state.ui);
+  const { isOpen: isSettingsOpen } = useSelector((state: RootState) => state.settings);
 
   const renderView = () => {
     switch (activeView) {
@@ -34,12 +36,9 @@ const MainContent: React.FC = () => {
           metadata={selectedMetadata} 
         />
       )}
-      {isSettingsOpen && (
-        <LazySettingsModal 
-          isOpen={isSettingsOpen} 
-          onClose={() => {}} 
-        />
-      )}
+      
+      {/* Settings Modal - Direct import since it manages its own state */}
+      <SettingsModal />
     </div>
   );
 };

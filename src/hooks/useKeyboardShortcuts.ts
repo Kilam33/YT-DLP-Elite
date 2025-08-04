@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '../store/store';
 import { setActiveView } from '../store/slices/uiSlice';
+import { clearCompleted } from '../store/slices/downloadsSlice';
+import { openSettings } from '../store/slices/settingsSlice';
 import toast from 'react-hot-toast';
 
 // Enhanced keyboard shortcuts for better UX
@@ -47,57 +49,71 @@ export const useKeyboardShortcuts = () => {
             toast.success('Switched to Logs', { duration: 1000 });
             break;
           
-          case 'n':
-            event.preventDefault();
-            // Focus URL input (if available)
-            const urlInput = document.querySelector('input[placeholder*="URL"]') as HTMLInputElement;
-            if (urlInput) {
-              urlInput.focus();
-              urlInput.select();
-            }
-            toast.success('Focus URL input', { duration: 1000 });
-            break;
+
           
-          case 's':
+          case 'o':
             event.preventDefault();
             // Open settings
-            const settingsButton = document.querySelector('[data-testid="settings-button"]') as HTMLElement;
-            if (settingsButton) {
-              settingsButton.click();
-            }
-            toast.success('Open Settings', { duration: 1000 });
-            break;
-          
-          case 'r':
-            event.preventDefault();
-            // Refresh current view
-            window.location.reload();
+            dispatch(openSettings('general'));
+            toast.success('Settings opened', { duration: 1000 });
             break;
           
           case 'p':
             event.preventDefault();
-            // Pause all downloads
-            const pauseButtons = document.querySelectorAll('[data-testid="pause-button"]');
-            pauseButtons.forEach(button => (button as HTMLElement).click());
-            toast.success('Paused all downloads', { duration: 1000 });
+            // Pause all active downloads
+            const activeDownloads = downloads.filter(d => 
+              d.status === 'downloading' || d.status === 'processing'
+            );
+            if (activeDownloads.length > 0) {
+              activeDownloads.forEach(download => {
+                window.electronAPI?.pauseDownload(download.id);
+              });
+              toast.success(`Paused ${activeDownloads.length} downloads`, { duration: 1000 });
+            } else {
+              toast.info('No active downloads to pause', { duration: 1000 });
+            }
             break;
           
           case 'u':
             event.preventDefault();
-            // Resume all downloads
-            const resumeButtons = document.querySelectorAll('[data-testid="resume-button"]');
-            resumeButtons.forEach(button => (button as HTMLElement).click());
-            toast.success('Resumed all downloads', { duration: 1000 });
+            // Resume all paused downloads
+            const pausedDownloads = downloads.filter(d => d.status === 'paused');
+            if (pausedDownloads.length > 0) {
+              pausedDownloads.forEach(download => {
+                window.electronAPI?.resumeDownload(download.id);
+              });
+              toast.success(`Resumed ${pausedDownloads.length} downloads`, { duration: 1000 });
+            } else {
+              toast.info('No paused downloads to resume', { duration: 1000 });
+            }
             break;
           
-          case 'c':
+          case 'x':
             event.preventDefault();
             // Clear completed downloads
-            const clearButton = document.querySelector('[data-testid="clear-completed"]') as HTMLElement;
-            if (clearButton) {
-              clearButton.click();
+            const completedCount = downloads.filter(d => d.status === 'completed').length;
+            if (completedCount > 0) {
+              dispatch(clearCompleted());
+              // Also clear from Electron storage
+              window.electronAPI?.clearCompleted();
+              toast.success(`Cleared ${completedCount} completed downloads`, { duration: 1000 });
+            } else {
+              toast.info('No completed downloads to clear', { duration: 1000 });
             }
-            toast.success('Clear completed downloads', { duration: 1000 });
+            break;
+          
+          case 'r':
+            event.preventDefault();
+            // Retry failed downloads
+            const failedDownloads = downloads.filter(d => d.status === 'error');
+            if (failedDownloads.length > 0) {
+              failedDownloads.forEach(download => {
+                window.electronAPI?.retryDownload(download.id);
+              });
+              toast.success(`Retrying ${failedDownloads.length} failed downloads`, { duration: 1000 });
+            } else {
+              toast.info('No failed downloads to retry', { duration: 1000 });
+            }
             break;
         }
       }
@@ -107,7 +123,7 @@ export const useKeyboardShortcuts = () => {
         case 'F1':
           event.preventDefault();
           // Show help
-          toast('Press Ctrl+1-4 to switch views, Ctrl+N for new download', { duration: 3000 });
+          toast('Press Ctrl+1-4 to switch views, Ctrl+O for settings, Ctrl+P/U to pause/resume downloads', { duration: 3000 });
           break;
         
         case 'F5':
@@ -244,9 +260,8 @@ export const useKeyboardShortcuts = () => {
       'Ctrl+2': 'Queue', 
       'Ctrl+3': 'History',
       'Ctrl+4': 'Logs',
-      'Ctrl+N': 'New Download',
-      'Ctrl+S': 'Settings',
-      'Ctrl+R': 'Refresh',
+      'Ctrl+O': 'Settings',
+      'Ctrl+R': 'Retry Failed',
       'Esc': 'Close Modal',
       'F1': 'Help',
       'F5': 'Refresh',
@@ -258,7 +273,7 @@ export const useKeyboardShortcuts = () => {
       'Delete': 'Remove Download',
       'Ctrl+P': 'Pause All',
       'Ctrl+U': 'Resume All',
-      'Ctrl+C': 'Clear Completed'
+      'Ctrl+X': 'Clear Completed'
     },
     queue: {
       '↑/↓': 'Navigate Queue',
