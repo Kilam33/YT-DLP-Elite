@@ -3,6 +3,7 @@ import downloadsReducer from './slices/downloadsSlice';
 import queueReducer from './slices/queueSlice';
 import settingsReducer from './slices/settingsSlice';
 import uiReducer from './slices/uiSlice';
+import { persistenceMiddleware } from './middleware/persistenceMiddleware';
 
 export const store = configureStore({
   reducer: {
@@ -21,7 +22,7 @@ export const store = configureStore({
           'downloads.items.*.completedAt'
         ],
       },
-    }),
+    }).concat(persistenceMiddleware),
 });
 
 export type RootState = ReturnType<typeof store.getState>;

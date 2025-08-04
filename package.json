@@ -28,18 +28,25 @@
   "license": "MIT",
   "dependencies": {
     "@reduxjs/toolkit": "^2.8.2",
+    "@types/react-window": "^1.8.8",
+    "chokidar": "^4.0.3",
     "concurrently": "^9.2.0",
     "cross-env": "^10.0.0",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.23.12",
     "lucide-react": "^0.344.0",
+    "pako": "^2.1.0",
     "react": "^18.3.1",
     "react-dnd": "^16.0.1",
     "react-dnd-html5-backend": "^16.0.1",
     "react-dom": "^18.3.1",
     "react-hot-toast": "^2.5.2",
     "react-redux": "^9.2.0",
-    "wait-on": "^8.0.4"
+    "react-window": "^1.8.11",
+    "react-window-infinite-loader": "^1.0.10",
+    "use-debounce": "^10.0.0",
+    "wait-on": "^8.0.4",
+    "zod": "^4.0.14"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",

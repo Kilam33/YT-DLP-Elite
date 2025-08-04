@@ -7,6 +7,7 @@ import { store } from './store/store';
 import TitleBar from './components/TitleBar';
 import Sidebar from './components/Sidebar';
 import MainContent from './components/MainContent';
+import ErrorBoundary from './components/ErrorBoundary';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useSettings } from './hooks/useSettings';
 import './utils/logger'; // Initialize logger
@@ -70,9 +71,11 @@ const AppContent: React.FC = () => {
 function App() {
   return (
     <Provider store={store}>
-      <DndProvider backend={HTML5Backend}>
-        <AppContent />
-      </DndProvider>
+      <ErrorBoundary>
+        <DndProvider backend={HTML5Backend}>
+          <AppContent />
+        </DndProvider>
+      </ErrorBoundary>
     </Provider>
   );
 }

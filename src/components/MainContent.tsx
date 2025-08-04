@@ -1,28 +1,24 @@
 import React from 'react';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store/store';
-import DownloadsView from './DownloadsView';
-import QueueView from './QueueView';
-import HistoryView from './HistoryView';
-import LogsView from './LogsView';
-import MetadataModal from './MetadataModal';
-import SettingsModal from './SettingsModal';
+import { LazyDownloadsView, LazyHistoryView, LazyQueueView, LazyLogsView, LazySettingsModal, LazyMetadataModal } from './LazyViews';
 
 const MainContent: React.FC = () => {
   const activeView = useSelector((state: RootState) => state.ui.activeView);
+  const { isSettingsOpen, isMetadataOpen, selectedMetadata } = useSelector((state: RootState) => state.ui);
 
   const renderView = () => {
     switch (activeView) {
       case 'downloads':
-        return <DownloadsView />;
+        return <LazyDownloadsView />;
       case 'queue':
-        return <QueueView />;
+        return <LazyQueueView />;
       case 'history':
-        return <HistoryView />;
+        return <LazyHistoryView />;
       case 'logs':
-        return <LogsView />;
+        return <LazyLogsView />;
       default:
-        return <DownloadsView />;
+        return <LazyDownloadsView />;
     }
   };
 
@@ -30,9 +26,20 @@ const MainContent: React.FC = () => {
     <div className="flex-1 flex flex-col min-h-0">
       {renderView()}
       
-      {/* Modals */}
-      <MetadataModal />
-      <SettingsModal />
+      {/* Modals - Lazy loaded for better performance */}
+      {isMetadataOpen && (
+        <LazyMetadataModal 
+          isOpen={isMetadataOpen} 
+          onClose={() => {}} 
+          metadata={selectedMetadata} 
+        />
+      )}
+      {isSettingsOpen && (
+        <LazySettingsModal 
+          isOpen={isSettingsOpen} 
+          onClose={() => {}} 
+        />
+      )}
     </div>
   );
 };

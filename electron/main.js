@@ -4,6 +4,8 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
+import YtDlpProcessPool from './processPool.js';
+import ResourceMonitor from './resourceMonitor.js';
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -14,6 +16,42 @@ const isDev = process.env.NODE_ENV === 'development';
 let mainWindow;
 let downloads = new Map();
 let downloadQueue = [];
+let activeDownloads = 0;
+let maxConcurrentDownloads = 3;
+let ytDlpProcessPool;
+let resourceMonitor;
+
+// Initialize process pool (disabled for now to prevent rapid process creation)
+function initializeProcessPool() {
+  try {
+    // Temporarily disable process pool to prevent rapid process creation
+    // ytDlpProcessPool = new YtDlpProcessPool(settings.maxConcurrentDownloads || 3);
+    console.log('Process pool disabled to prevent rapid process creation');
+    
+    // Set up process pool event handlers
+    // ytDlpProcessPool.on('processError', ({ processId, error }) => {
+    //   console.error(`Process pool error for process ${processId}:`, error);
+    // });
+    
+    // ytDlpProcessPool.on('error', (error) => {
+    //   console.error('Process pool error:', error);
+    // });
+  } catch (error) {
+    console.error('Failed to initialize process pool:', error);
+  }
+}
+
+// Initialize resource monitoring
+function initializeResourceMonitor() {
+  try {
+    resourceMonitor = new ResourceMonitor();
+    resourceMonitor.startMonitoring(5000); // Monitor every 5 seconds
+    console.log('Resource monitoring initialized');
+  } catch (error) {
+    console.error('Failed to initialize resource monitor:', error);
+  }
+}
+
 let settings = {
   maxConcurrentDownloads: 3,
   outputPath: path.join(process.cwd(), 'downloads'),
@@ -175,8 +213,9 @@ async function createWindow() {
 
 // Check if yt-dlp is available
 async function checkYtDlp() {
+  console.log('Checking yt-dlp availability...');
+  
   return new Promise((resolve) => {
-    console.log('Checking yt-dlp availability...');
     const ytDlp = spawn('yt-dlp', ['--version']);
     
     ytDlp.on('close', (code) => {
@@ -230,6 +269,8 @@ function serializeDownload(download) {
 // App event handlers
 app.whenReady().then(async () => {
   await loadSettings();
+  initializeProcessPool();
+  initializeResourceMonitor();
   await createWindow();
 });
 
@@ -237,6 +278,39 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+// Cleanup processes on app exit
+app.on('before-quit', () => {
+  if (ytDlpProcessPool) {
+    console.log('Shutting down process pool...');
+    ytDlpProcessPool.shutdown();
+  }
+  if (resourceMonitor) {
+    console.log('Stopping resource monitoring...');
+    resourceMonitor.cleanup();
+  }
+});
+
+// Handle process termination signals
+process.on('SIGTERM', () => {
+  if (ytDlpProcessPool) {
+    ytDlpProcessPool.shutdown();
+  }
+  if (resourceMonitor) {
+    resourceMonitor.cleanup();
+  }
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  if (ytDlpProcessPool) {
+    ytDlpProcessPool.shutdown();
+  }
+  if (resourceMonitor) {
+    resourceMonitor.cleanup();
+  }
+  process.exit(0);
 });
 
 app.on('activate', async () => {
@@ -254,6 +328,50 @@ ipcMain.handle('check-yt-dlp', async () => {
 
 ipcMain.handle('check-ffmpeg', async () => {
   return await checkFfmpeg();
+});
+
+// Process pool management
+ipcMain.handle('get-process-pool-stats', () => {
+  if (ytDlpProcessPool) {
+    return ytDlpProcessPool.getStats();
+  }
+  return null;
+});
+
+ipcMain.handle('health-check-process-pool', async () => {
+  if (ytDlpProcessPool) {
+    return await ytDlpProcessPool.healthCheck();
+  }
+  return [];
+});
+
+// Resource monitoring handlers
+ipcMain.handle('get-resource-metrics', () => {
+  if (resourceMonitor) {
+    return resourceMonitor.getCurrentMetrics();
+  }
+  return null;
+});
+
+ipcMain.handle('get-resource-history', () => {
+  if (resourceMonitor) {
+    return resourceMonitor.getMetricsHistory();
+  }
+  return [];
+});
+
+ipcMain.handle('get-resource-summary', () => {
+  if (resourceMonitor) {
+    return resourceMonitor.getMetricsSummary();
+  }
+  return null;
+});
+
+ipcMain.handle('get-resource-alerts', () => {
+  if (resourceMonitor) {
+    return resourceMonitor.getResourceAlerts();
+  }
+  return [];
 });
 
 ipcMain.handle('get-downloads', () => {
@@ -290,7 +408,7 @@ ipcMain.handle('add-log', (event, logData) => {
 ipcMain.handle('add-download', async (event, url, options = {}) => {
   const id = Date.now().toString();
   
-  // Fetch metadata first
+  // Fetch metadata first using direct spawn
   let metadata = null;
   try {
     metadata = await new Promise((resolve) => {
@@ -418,10 +536,8 @@ ipcMain.handle('start-download', async (event, id) => {
   download.progress = 0;
   downloads.set(id, download);
   
-  // Send immediate update to show initialization state
-  if (mainWindow) {
-    mainWindow.webContents.send('download-updated', serializeDownload(download));
-  }
+  // Performance optimization: Send immediate update via batch system
+  sendDownloadUpdate(download);
 
   // Start the download immediately
   simulateDownload(id);
@@ -631,13 +747,79 @@ ipcMain.handle('close-window', () => {
   mainWindow.close();
 });
 
-// Download processing
+// Performance optimization: Batch IPC messages
+const batchQueue = new Map();
+const BATCH_INTERVAL = 100; // 100ms batch interval
+const MAX_BATCH_SIZE = 10; // Max updates per batch
+let batchTimeout = null;
+
+// Function to add update to batch queue
+const addToBatch = (channel, data) => {
+  if (!batchQueue.has(channel)) {
+    batchQueue.set(channel, []);
+  }
+  
+  const queue = batchQueue.get(channel);
+  queue.push(data);
+  
+  // Schedule batch flush
+  if (!batchTimeout) {
+    batchTimeout = setTimeout(flushBatch, BATCH_INTERVAL);
+  }
+  
+  // Force flush if batch is full
+  if (queue.length >= MAX_BATCH_SIZE) {
+    clearTimeout(batchTimeout);
+    batchTimeout = null;
+    flushBatch();
+  }
+};
+
+// Function to flush all batched messages
+const flushBatch = () => {
+  if (batchTimeout) {
+    clearTimeout(batchTimeout);
+    batchTimeout = null;
+  }
+  
+  for (const [channel, messages] of batchQueue.entries()) {
+    if (messages.length > 0) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (messages.length === 1) {
+          // Single message - send directly
+          mainWindow.webContents.send(channel, messages[0]);
+        } else {
+          // Multiple messages - send as batch
+          mainWindow.webContents.send(`${channel}-batch`, messages);
+        }
+      }
+    }
+  }
+  
+  // Clear the queue
+  batchQueue.clear();
+};
+
+// Performance optimization: Enhanced download update handling with batching
+const sendDownloadUpdate = (download) => {
+  addToBatch('download-updated', serializeDownload(download));
+};
+
+// Performance optimization: Enhanced log batching
+const sendLogUpdate = (logData) => {
+  addToBatch('log-added', logData);
+};
+
+// Download processing with rate limiting
 async function processQueue() {
-  const activeDownloads = Array.from(downloads.values()).filter(d => 
-    d.status === 'downloading'
+  const currentActiveDownloads = Array.from(downloads.values()).filter(d => 
+    d.status === 'downloading' || d.status === 'connecting' || d.status === 'initializing' || d.status === 'processing'
   ).length;
 
-  if (activeDownloads >= settings.maxConcurrentDownloads) {
+  // Rate limiting: don't start more than maxConcurrentDownloads
+  if (currentActiveDownloads >= maxConcurrentDownloads) {
+    console.log(`Rate limiting: ${currentActiveDownloads} active downloads, max: ${maxConcurrentDownloads}`);
+    setTimeout(processQueue, 2000); // Wait 2 seconds before trying again
     return;
   }
 
@@ -667,7 +849,7 @@ async function processQueue() {
     });
   }
   
-  // Continue processing queue
+  // Continue processing queue with delay to prevent rapid process creation
   setTimeout(processQueue, 1000);
 }
 
@@ -690,9 +872,8 @@ function simulateDownload(id) {
     download.status = 'error';
     downloads.set(id, download);
     
-    if (mainWindow) {
-      mainWindow.webContents.send('download-updated', serializeDownload(download));
-    }
+    // Performance optimization: Send update via batch system
+    sendDownloadUpdate(download);
     return;
   });
 
@@ -784,31 +965,41 @@ function simulateDownload(id) {
 
   args.push(download.url);
 
-  const ytDlp = spawn('yt-dlp', args);
-  download.process = ytDlp;
+  // Create yt-dlp process with proper error handling
+  let ytDlp;
+  try {
+    ytDlp = spawn('yt-dlp', args);
+    download.process = ytDlp;
 
-  // Log the command for debugging
-  console.log(`yt-dlp command for download ${id}:`, 'yt-dlp', args.join(' '));
-  console.log(`Download quality: "${download.quality}"`);
-  console.log(`Custom args: "${settings.customYtDlpArgs}"`);
-  
-  // Log available formats for debugging
-  if (download.metadata && download.metadata.formats) {
-    console.log('Available formats:');
-    download.metadata.formats.forEach(format => {
-      if (format.height) {
-        console.log(`  - ${format.format_id}: ${format.height}p, ${format.ext}, vcodec: ${format.vcodec}, acodec: ${format.acodec}`);
-      }
-    });
-  }
+    // Log the command for debugging
+    console.log(`yt-dlp command for download ${id}:`, 'yt-dlp', args.join(' '));
+    console.log(`Download quality: "${download.quality}"`);
+    console.log(`Custom args: "${settings.customYtDlpArgs}"`);
+    
+    // Log available formats for debugging
+    if (download.metadata && download.metadata.formats) {
+      console.log('Available formats:');
+      download.metadata.formats.forEach(format => {
+        if (format.height) {
+          console.log(`  - ${format.format_id}: ${format.height}p, ${format.ext}, vcodec: ${format.vcodec}, acodec: ${format.acodec}`);
+        }
+      });
+    }
 
-  // Update status to downloading once process starts
-  download.status = 'downloading';
-  download.startedAt = new Date();
-  downloads.set(id, download);
-  
-  if (mainWindow) {
-    mainWindow.webContents.send('download-updated', serializeDownload(download));
+    // Update status to downloading once process starts
+    download.status = 'downloading';
+    download.startedAt = new Date();
+    downloads.set(id, download);
+    
+    // Performance optimization: Send update via batch system
+    sendDownloadUpdate(download);
+  } catch (error) {
+    console.error(`Failed to spawn yt-dlp for download ${id}:`, error);
+    download.status = 'error';
+    download.error = error.message;
+    downloads.set(id, download);
+    sendDownloadUpdate(download);
+    return;
   }
 
   ytDlp.stdout.on('data', (data) => {
@@ -878,10 +1069,8 @@ function simulateDownload(id) {
           
           downloads.set(id, download);
           
-          // Send update to renderer
-          if (mainWindow) {
-            mainWindow.webContents.send('download-updated', serializeDownload(download));
-          }
+          // Performance optimization: Send update via batch system
+          sendDownloadUpdate(download);
         }
       }
       // Handle processing/merging status
@@ -889,9 +1078,8 @@ function simulateDownload(id) {
         download.status = 'processing';
         downloads.set(id, download);
         
-        if (mainWindow) {
-          mainWindow.webContents.send('download-updated', serializeDownload(download));
-        }
+        // Performance optimization: Send update via batch system
+        sendDownloadUpdate(download);
       }
       // Extract filename from download line
       else if (line.includes('[download]')) {
@@ -1014,9 +1202,8 @@ function simulateDownload(id) {
         
         downloads.set(id, download);
         
-        if (mainWindow) {
-          mainWindow.webContents.send('download-updated', serializeDownload(download));
-        }
+        // Performance optimization: Send update via batch system
+        sendDownloadUpdate(download);
       }
     }
   });
@@ -1025,16 +1212,14 @@ function simulateDownload(id) {
     const error = data.toString();
     console.error(`yt-dlp error for download ${id}:`, error);
     
-    // Send error to renderer
-    if (mainWindow) {
-      mainWindow.webContents.send('log-added', {
-        level: 'error',
-        message: `yt-dlp error: ${error.trim()}`,
-        source: 'yt-dlp',
-        downloadId: id,
-        data: { error: error.trim() }
-      });
-    }
+    // Performance optimization: Send error via batch system
+    sendLogUpdate({
+      level: 'error',
+      message: `yt-dlp error: ${error.trim()}`,
+      source: 'yt-dlp',
+      downloadId: id,
+      data: { error: error.trim() }
+    });
     
     // Only treat actual ERROR lines as errors, not warnings
     if (error.includes('ERROR:')) {
@@ -1064,16 +1249,14 @@ function simulateDownload(id) {
       // Just log warnings, don't treat as errors
       console.warn(`yt-dlp warning for download ${id}:`, error);
       
-      // Send warning to renderer
-      if (mainWindow) {
-        mainWindow.webContents.send('log-added', {
-          level: 'warning',
-          message: `yt-dlp warning: ${error.trim()}`,
-          source: 'yt-dlp',
-          downloadId: id,
-          data: { warning: error.trim() }
-        });
-      }
+      // Performance optimization: Send warning via batch system
+      sendLogUpdate({
+        level: 'warning',
+        message: `yt-dlp warning: ${error.trim()}`,
+        source: 'yt-dlp',
+        downloadId: id,
+        data: { warning: error.trim() }
+      });
     }
   });
 
@@ -1228,14 +1411,12 @@ function simulateDownload(id) {
       download.process = null;
       downloads.set(id, download);
       
-      // Send update to renderer
-      if (mainWindow) {
-        mainWindow.webContents.send('download-updated', serializeDownload(download));
-      }
+      // Performance optimization: Send update via batch system
+      sendDownloadUpdate(download);
     }
     
-    // Process next in queue
-    processQueue();
+    // Process next in queue with delay to prevent rapid process creation
+    setTimeout(processQueue, 2000);
   });
 
   ytDlp.on('error', (error) => {
@@ -1245,11 +1426,11 @@ function simulateDownload(id) {
     download.process = null;
     downloads.set(id, download);
     
-    if (mainWindow) {
-      mainWindow.webContents.send('download-updated', serializeDownload(download));
-    }
+    // Performance optimization: Send update via batch system
+    sendDownloadUpdate(download);
     
-    processQueue();
+    // Process next in queue with delay to prevent rapid process creation
+    setTimeout(processQueue, 2000);
   });
 }
 

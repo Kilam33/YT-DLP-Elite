@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Download } from '../store/slices/downloadsSlice';
 import { RootState } from '../store/store';
@@ -35,7 +35,7 @@ interface DownloadCardProps {
   onRemove: (id: string) => void;
 }
 
-const DownloadCard: React.FC<DownloadCardProps> = ({
+const DownloadCard: React.FC<DownloadCardProps> = React.memo(({
   download,
   onPause,
   onResume,
@@ -45,81 +45,98 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
   const dispatch = useDispatch();
   const settings = useSelector((state: RootState) => state.settings.data);
 
-  // Find the active preset based on current settings
-  const activePreset = settings.customYtDlpArgs ? findPresetByArgs(settings.customYtDlpArgs) : findPresetById('default-mp4');
+  // Performance optimization: Memoize expensive calculations
+  const activePreset = useMemo(() => 
+    settings.customYtDlpArgs ? findPresetByArgs(settings.customYtDlpArgs) : findPresetById('default-mp4'),
+    [settings.customYtDlpArgs]
+  );
 
-  const getStatusIcon = () => {
-    switch (download.status) {
-      case 'completed':
-        return <CheckCircle className="w-5 h-5 text-lime-400" />;
-      case 'error':
-        return <AlertCircle className="w-5 h-5 text-red-400" />;
-      case 'downloading':
-        return <DownloadIcon className="w-5 h-5 text-blue-400 animate-pulse" />;
-      case 'connecting':
-      case 'initializing':
-      case 'processing':
-        return <DownloadIcon className="w-5 h-5 text-blue-400 animate-pulse" />;
-      case 'paused':
-        return <Pause className="w-5 h-5 text-orange-400" />;
-      case 'pending':
-        return <Clock className="w-5 h-5 text-slate-400" />;
-      default:
-        return <Clock className="w-5 h-5 text-slate-400" />;
-    }
-  };
+  // Performance optimization: Memoize status-related calculations
+  const statusInfo = useMemo(() => {
+    const getStatusIcon = () => {
+      switch (download.status) {
+        case 'completed':
+          return <CheckCircle className="w-5 h-5 text-lime-400" />;
+        case 'error':
+          return <AlertCircle className="w-5 h-5 text-red-400" />;
+        case 'downloading':
+          return <DownloadIcon className="w-5 h-5 text-blue-400 animate-pulse" />;
+        case 'connecting':
+        case 'initializing':
+        case 'processing':
+          return <DownloadIcon className="w-5 h-5 text-blue-400 animate-pulse" />;
+        case 'paused':
+          return <Pause className="w-5 h-5 text-orange-400" />;
+        case 'pending':
+          return <Clock className="w-5 h-5 text-slate-400" />;
+        default:
+          return <Clock className="w-5 h-5 text-slate-400" />;
+      }
+    };
 
-  const getStatusColor = () => {
-    switch (download.status) {
-      case 'completed':
-        return 'border-lime-500/30 bg-lime-500/5';
-      case 'error':
-        return 'border-red-500/30 bg-red-500/5';
-      case 'downloading':
-      case 'connecting':
-      case 'initializing':
-      case 'processing':
-        return 'border-blue-500/30 bg-blue-500/5';
-      case 'paused':
-        return 'border-orange-500/30 bg-orange-500/5';
-      case 'pending':
-        return 'border-slate-600/30 bg-slate-700/10';
-      default:
-        return 'border-slate-700/50 bg-slate-800/20';
-    }
-  };
+    const getStatusColor = () => {
+      switch (download.status) {
+        case 'completed':
+          return 'border-lime-500/30 bg-lime-500/5';
+        case 'error':
+          return 'border-red-500/30 bg-red-500/5';
+        case 'downloading':
+        case 'connecting':
+        case 'initializing':
+        case 'processing':
+          return 'border-blue-500/30 bg-blue-500/5';
+        case 'paused':
+          return 'border-orange-500/30 bg-orange-500/5';
+        case 'pending':
+          return 'border-slate-600/30 bg-slate-700/10';
+        default:
+          return 'border-slate-700/50 bg-slate-800/20';
+      }
+    };
 
-  const getStatusText = () => {
-    switch (download.status) {
-      case 'completed':
-        return 'Completed';
-      case 'error':
-        return 'Error';
-      case 'downloading':
-        return 'Downloading';
-      case 'connecting':
-        return 'Connecting...';
-      case 'initializing':
-        return 'Initializing...';
-      case 'processing':
-        return 'Processing...';
-      case 'paused':
-        return 'Paused';
-      case 'pending':
-        return 'Queued';
-      default:
-        return 'Unknown';
-    }
-  };
+    const getStatusText = () => {
+      switch (download.status) {
+        case 'completed':
+          return 'Completed';
+        case 'error':
+          return 'Error';
+        case 'downloading':
+          return 'Downloading';
+        case 'connecting':
+          return 'Connecting...';
+        case 'initializing':
+          return 'Initializing...';
+        case 'processing':
+          return 'Processing...';
+        case 'paused':
+          return 'Paused';
+        case 'pending':
+          return 'Queued';
+        default:
+          return 'Unknown';
+      }
+    };
 
-  const getQualityIcon = () => {
+    return {
+      icon: getStatusIcon(),
+      color: getStatusColor(),
+      text: getStatusText(),
+    };
+  }, [download.status]);
+
+  const getStatusIcon = () => statusInfo.icon;
+  const getStatusColor = () => statusInfo.color;
+  const getStatusText = () => statusInfo.text;
+
+  // Performance optimization: Memoize icon calculations
+  const qualityIcon = useMemo(() => {
     if (download.quality === 'audio') {
       return <Music className="w-3 h-3" />;
     }
     return <Video className="w-3 h-3" />;
-  };
+  }, [download.quality]);
 
-  const getPresetIcon = () => {
+  const presetIcon = useMemo(() => {
     if (!activePreset) return <Settings className="w-3 h-3" />;
     
     switch (activePreset.id) {
@@ -140,7 +157,19 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
       default:
         return <Video className="w-3 h-3" />;
     }
-  };
+  }, [activePreset]);
+
+  const getQualityIcon = () => qualityIcon;
+  const getPresetIcon = () => presetIcon;
+
+  // Performance optimization: Memoize action handlers
+  const handlePause = useCallback(() => onPause(download.id), [onPause, download.id]);
+  const handleResume = useCallback(() => onResume(download.id), [onResume, download.id]);
+  const handleRetry = useCallback(() => onRetry(download.id), [onRetry, download.id]);
+  const handleRemove = useCallback(() => onRemove(download.id), [onRemove, download.id]);
+  const handleOpenMetadata = useCallback(() => {
+    dispatch(openMetadataModal({ download }));
+  }, [dispatch, download]);
 
   return (
     <motion.div
@@ -183,7 +212,7 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
         <div className="flex items-center space-x-1 ml-2">
           {download.metadata && (
             <button
-              onClick={() => dispatch(openMetadataModal(download.metadata))}
+              onClick={handleOpenMetadata}
               className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
               title="View Details"
             >
@@ -253,7 +282,7 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
           
           {(download.status === 'downloading' || download.status === 'initializing' || download.status === 'connecting') && (
             <button
-              onClick={() => onPause(download.id)}
+              onClick={handlePause}
               className="p-1.5 rounded-lg hover:bg-orange-500/20 text-orange-400 hover:text-orange-300 transition-colors"
               title="Pause"
             >
@@ -263,7 +292,7 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
           
           {download.status === 'paused' && (
             <button
-              onClick={() => onResume(download.id)}
+              onClick={handleResume}
               className="p-1.5 rounded-lg hover:bg-lime-500/20 text-lime-400 hover:text-lime-300 transition-colors"
               title="Resume"
             >
@@ -273,7 +302,7 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
           
           {download.status === 'error' && (
             <button
-              onClick={() => onRetry(download.id)}
+              onClick={handleRetry}
               className="p-1.5 rounded-lg hover:bg-blue-500/20 text-blue-400 hover:text-blue-300 transition-colors"
               title="Retry"
             >
@@ -282,7 +311,7 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
           )}
           
           <button
-            onClick={() => onRemove(download.id)}
+            onClick={handleRemove}
             className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors"
             title="Remove"
           >
@@ -459,6 +488,6 @@ const DownloadCard: React.FC<DownloadCardProps> = ({
       )}
     </motion.div>
   );
-};
+});
 
 export default DownloadCard;

@@ -39,6 +39,7 @@ export interface ElectronAPI {
   
   // Event listeners
   onDownloadUpdated: (callback: (download: any) => void) => void;
+  onDownloadUpdatedBatch?: (callback: (downloads: any[]) => void) => void;
   removeDownloadUpdateListener: () => void;
   onLogAdded: (callback: (logData: any) => void) => void;
   removeLogAddedListener: () => void;

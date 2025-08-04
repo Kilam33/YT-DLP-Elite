@@ -5,11 +5,20 @@ import {
   setDownloads, 
   updateDownload, 
   addDownload,
-  clearCompleted 
+  clearCompleted,
+  setCurrentPage,
+  setPageSize,
+  selectPaginatedItems,
+  selectPaginationInfo,
+  updateMultipleDownloads
 } from '../store/slices/downloadsSlice';
 import { addToQueue, removeFromQueue } from '../store/slices/queueSlice';
 import { addLog } from '../store/slices/uiSlice';
 import DownloadCard from './DownloadCard';
+import { useDebouncedDownloadUpdates } from '../hooks/useDebouncedDownloadUpdates';
+import { useRetryLogic } from '../hooks/useRetryLogic';
+import Pagination from './Pagination';
+import { loadDownloadsFromStorage } from '../store/middleware/persistenceMiddleware';
 import { 
   Plus, 
   Trash2,
@@ -27,10 +36,13 @@ import {
   Settings,
   Music
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { OptimizedAnimatePresence, OptimizedMotionDiv, OptimizedListContainer, OptimizedListItem } from './OptimizedAnimations';
+import VirtualizedDownloadsList from './VirtualizedDownloadsList';
 import toast from 'react-hot-toast';
 import { formatDuration } from '../utils/format';
 import { findPresetByArgs } from '../config/presets';
+import { validateUrl, sanitizeUrl, validateDownloadOptions, validateMetadataIntegrity } from '../utils/validation';
+import notificationQueue from '../utils/notificationQueue';
 
 interface VideoMetadata {
   title: string;
@@ -65,9 +77,21 @@ interface PlaylistMetadata {
 
 const DownloadsView: React.FC = () => {
   const dispatch = useDispatch();
-  const { items: downloads } = useSelector((state: RootState) => state.downloads);
+  // Performance optimization: Use paginated downloads instead of all downloads
+  const downloads = useSelector(selectPaginatedItems);
+  const paginationInfo = useSelector(selectPaginationInfo);
   const settings = useSelector((state: RootState) => state.settings.data);
   const activeView = useSelector((state: RootState) => state.ui.activeView);
+  
+  // Performance optimization: Debounced download updates
+  const { queueUpdate, flushImmediately } = useDebouncedDownloadUpdates();
+  
+  // Performance optimization: Retry logic with exponential backoff
+  const { executeWithRetry, getRetryStats } = useRetryLogic({
+    maxRetries: 3,
+    baseDelay: 1000,
+    maxDelay: 30000,
+  });
   
   const [isLoading, setIsLoading] = useState(true);
   const [url, setUrl] = useState('');
@@ -88,26 +112,88 @@ const DownloadsView: React.FC = () => {
     checkYtDlpAvailability();
     checkFfmpegAvailability();
     
-    // Set up download update listener
-    if (window.electronAPI) {
-      window.electronAPI.onDownloadUpdated((download) => {
-        dispatch(updateDownload(download));
-        
-        // Remove from queue if download starts
-        if (download.status === 'downloading' || download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing' || download.status === 'pending') {
-          dispatch(removeFromQueue(download.id));
-        }
+    // Set up download update listener with debounced updates for performance
+          if (window.electronAPI) {
+        // Performance optimization: Handle single download updates
+        window.electronAPI.onDownloadUpdated((download) => {
+          // Use debounced updates for progress changes to reduce re-renders
+          if ((download.status === 'downloading' || download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing') && download.progress !== undefined && download.progress >= 0) {
+            queueUpdate({
+              id: download.id,
+              progress: download.progress,
+              speed: download.speed,
+              eta: download.eta,
+              downloaded: download.downloaded,
+              filesize: download.filesize,
+              status: download.status, // Include status in progress updates
+            });
+          } else {
+            // For status changes, update immediately
+            dispatch(updateDownload(download));
+            flushImmediately();
+          }
+          
+          // Remove from queue if download starts
+          if (download.status === 'downloading' || download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing' || download.status === 'pending') {
+            dispatch(removeFromQueue(download.id));
+          }
 
-        // Handle completed downloads with delay
-        if (download.status === 'completed') {
-          // Keep completed downloads visible for a moment before moving to history
-          setTimeout(() => {
-            // The download will automatically move to history view
-            // but we keep it visible in downloads for a moment for better UX
-          }, 3000); // 3 second delay
-        }
-      });
-    }
+          // Handle completed downloads with delay
+          if (download.status === 'completed') {
+            // Show success notification
+            toast.success(`Download completed: ${download.metadata?.title || 'Video'}`, {
+              duration: 3000,
+              icon: '✅',
+            });
+            
+            // Keep completed downloads visible for a moment before moving to history
+            setTimeout(() => {
+              // The download will automatically move to history view
+              // but we keep it visible in downloads for a moment for better UX
+            }, 3000); // 3 second delay
+          }
+        });
+
+        // Performance optimization: Handle batched download updates
+        window.electronAPI.onDownloadUpdatedBatch?.((downloads) => {
+          // Process multiple downloads at once for better performance
+          const updates = downloads.map(download => ({
+            id: download.id,
+            progress: download.progress,
+            speed: download.speed,
+            eta: download.eta,
+            downloaded: download.downloaded,
+            filesize: download.filesize,
+            status: download.status,
+          }));
+
+          // Use batch update for multiple downloads
+          if (updates.length > 1) {
+            dispatch(updateMultipleDownloads(updates as any));
+          } else if (updates.length === 1) {
+            dispatch(updateDownload(updates[0] as any));
+          }
+
+          // Handle queue removals and completions
+          downloads.forEach(download => {
+            if (download.status === 'downloading' || download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing' || download.status === 'pending') {
+              dispatch(removeFromQueue(download.id));
+            }
+
+            if (download.status === 'completed') {
+              // Show success notification for batch updates
+              toast.success(`Download completed: ${download.metadata?.title || 'Video'}`, {
+                duration: 3000,
+                icon: '✅',
+              });
+              
+              setTimeout(() => {
+                // Keep completed downloads visible for a moment
+              }, 3000);
+            }
+          });
+        });
+      }
 
     return () => {
       if (window.electronAPI) {
@@ -140,9 +226,24 @@ const DownloadsView: React.FC = () => {
 
   const loadDownloads = async () => {
     try {
+      // Performance optimization: Load from localStorage first for instant UI
+      const storedDownloads = loadDownloadsFromStorage();
+      if (storedDownloads.length > 0) {
+        dispatch(setDownloads(storedDownloads));
+        console.log(`Loaded ${storedDownloads.length} downloads from localStorage`);
+      }
+      
+      // Then try to load from Electron storage (if available)
       if (window.electronAPI) {
-        const downloadsData = await window.electronAPI.getDownloads();
-        dispatch(setDownloads(downloadsData));
+        try {
+          const downloadsData = await window.electronAPI.getDownloads();
+          if (downloadsData && downloadsData.length > 0) {
+            dispatch(setDownloads(downloadsData));
+            console.log(`Loaded ${downloadsData.length} downloads from Electron storage`);
+          }
+        } catch (electronError) {
+          console.warn('Failed to load from Electron storage, using localStorage:', electronError);
+        }
       }
     } catch (error) {
       console.error('Failed to load downloads:', error);
@@ -305,14 +406,43 @@ const DownloadsView: React.FC = () => {
 
   const handleRetry = async (id: string) => {
     try {
-      await window.electronAPI?.retryDownload(id);
-      toast.success('Download retrying');
+      const retryStats = getRetryStats(id);
+      
+      // Check if circuit breaker is open
+      if (retryStats.circuitBreakerOpen) {
+        toast.error(`Too many failures. Please wait before retrying.`);
+        return;
+      }
+
+      await executeWithRetry(
+        id,
+        () => window.electronAPI?.retryDownload(id) || Promise.reject(new Error('Electron API not available')),
+        (retryCount, delay) => {
+          toast.success(`Retry ${retryCount} initiated. Next retry in ${Math.ceil(delay / 1000)}s if needed.`);
+          dispatch(addLog({
+            level: 'info',
+            message: `Retry ${retryCount} for download ${id} (delay: ${delay}ms)`,
+            downloadId: id,
+          }));
+        },
+        (error) => {
+          toast.error(`Max retries exceeded for download ${id}`);
+          dispatch(addLog({
+            level: 'error',
+            message: `Max retries exceeded for download ${id}: ${error.message}`,
+            downloadId: id,
+          }));
+        }
+      );
+      
+      toast.success('Download retry successful');
       dispatch(addLog({
         level: 'info',
-        message: 'Download retry initiated',
+        message: 'Retry successful for download',
         downloadId: id,
       }));
     } catch (error) {
+      console.error('Failed to retry download:', error);
       toast.error('Failed to retry download');
       dispatch(addLog({
         level: 'error',
@@ -360,6 +490,15 @@ const DownloadsView: React.FC = () => {
     }
   };
 
+  // Performance optimization: Pagination handlers
+  const handlePageChange = (page: number) => {
+    dispatch(setCurrentPage(page));
+  };
+
+  const handlePageSizeChange = (pageSize: number) => {
+    dispatch(setPageSize(pageSize));
+  };
+
   const handlePasteFromClipboard = async () => {
     try {
       const clipboardText = await window.electronAPI?.getClipboard();
@@ -399,13 +538,28 @@ const DownloadsView: React.FC = () => {
   };
 
   const handleStartDownload = async () => {
-    if (!url.trim() || !metadata) {
-      toast.error('Please wait for metadata to load');
+    // Validate URL
+    const sanitizedUrl = sanitizeUrl(url.trim());
+    const urlValidation = validateUrl(sanitizedUrl);
+    if (!urlValidation.isValid) {
+      notificationQueue.error(urlValidation.error || 'Invalid URL');
+      return;
+    }
+
+    if (!metadata) {
+      notificationQueue.warning('Please wait for metadata to load');
+      return;
+    }
+
+    // Validate metadata integrity
+    const metadataValidation = validateMetadataIntegrity(metadata);
+    if (!metadataValidation.isValid) {
+      notificationQueue.error(`Metadata validation failed: ${metadataValidation.errors.join(', ')}`);
       return;
     }
 
     if (!quality.trim()) {
-      toast.error('Please select a quality');
+      notificationQueue.warning('Please select a quality');
       return;
     }
 
@@ -417,7 +571,14 @@ const DownloadsView: React.FC = () => {
         quality: quality,
       };
       
-      const download = await window.electronAPI?.addDownload(url.trim(), downloadOptions);
+      // Validate download options
+      const optionsValidation = validateDownloadOptions(downloadOptions);
+      if (!optionsValidation.isValid) {
+        notificationQueue.error(optionsValidation.error || 'Invalid download options');
+        return;
+      }
+      
+      const download = await window.electronAPI?.addDownload(sanitizedUrl, downloadOptions);
       
       if (download) {
         dispatch(addDownload(download));
@@ -425,9 +586,9 @@ const DownloadsView: React.FC = () => {
         // Start the download immediately
         const started = await window.electronAPI?.startDownload(download.id);
         if (started) {
-          toast.success('Download started successfully');
+          notificationQueue.success('Download started successfully');
         } else {
-          toast.error('Failed to start download');
+          notificationQueue.error('Failed to start download');
           dispatch(addLog({
             level: 'error',
             message: 'Failed to start download',
@@ -444,7 +605,7 @@ const DownloadsView: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to start download:', error);
-      toast.error('Failed to start download');
+      notificationQueue.error('Failed to start download');
       dispatch(addLog({
         level: 'error',
         message: `Failed to start download: ${error}`,
@@ -562,7 +723,17 @@ const DownloadsView: React.FC = () => {
   const downloadingItems = activeDownloads.filter(d => 
     d.status === 'downloading' || d.status === 'paused' || d.status === 'initializing' || d.status === 'connecting' || d.status === 'processing'
   );
-  const completedItems = activeDownloads.filter(d => d.status === 'completed');
+  const completedItems = activeDownloads
+    .filter(d => d.status === 'completed')
+    .sort((a, b) => {
+      // Sort by completion time, most recent first
+      if (a.completedAt && b.completedAt) {
+        return new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime();
+      }
+      // If no completion time, sort by ID (newer IDs first)
+      return b.id.localeCompare(a.id);
+    })
+    .slice(0, 10); // Limit to 10 most recent completed downloads
 
   if (isLoading) {
     return (
@@ -673,9 +844,12 @@ const DownloadsView: React.FC = () => {
           )}
 
           {metadata && showPreview && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
+            <OptimizedMotionDiv
+              variants={{
+                initial: { opacity: 0, y: 10 },
+                animate: { opacity: 1, y: 0 },
+                exit: { opacity: 0, y: -10 }
+              }}
               className="p-6 bg-gradient-to-br from-slate-700/40 to-slate-800/40 rounded-xl border border-slate-600/50 shadow-lg"
             >
               {/* Playlist Preview */}
@@ -946,18 +1120,21 @@ const DownloadsView: React.FC = () => {
                   </div>
                 </div>
               )}
-            </motion.div>
+            </OptimizedMotionDiv>
           )}
         </div>
       </div>
 
       {/* Active Downloads List */}
       <div className="flex-1 overflow-y-auto p-6 min-h-0">
-        <AnimatePresence>
+        <OptimizedAnimatePresence>
           {activeDownloads.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
+            <OptimizedMotionDiv
+              variants={{
+                initial: { opacity: 0, y: 20 },
+                animate: { opacity: 1, y: 0 },
+                exit: { opacity: 0, y: -20 }
+              }}
               className="text-center py-12"
             >
               <Download className="w-16 h-16 text-white/20 mx-auto mb-4" />
@@ -967,7 +1144,7 @@ const DownloadsView: React.FC = () => {
               <p className="text-white/50">
                 Paste a URL above to start downloading
               </p>
-            </motion.div>
+            </OptimizedMotionDiv>
           ) : (
             <div className="space-y-6">
               {/* Currently Downloading */}
@@ -978,46 +1155,70 @@ const DownloadsView: React.FC = () => {
                     <h2 className="text-lg font-semibold text-white">Active Downloads</h2>
                     <span className="text-sm text-white/60">({downloadingItems.length})</span>
                   </div>
-                  <div className="grid gap-4">
-                    {downloadingItems.map((download) => (
-                      <DownloadCard
-                        key={download.id}
-                        download={download}
-                        onPause={handlePause}
-                        onResume={handleResume}
-                        onRetry={handleRetry}
-                        onRemove={handleRemove}
-                      />
-                    ))}
-                  </div>
+                  <VirtualizedDownloadsList
+                    downloads={downloadingItems}
+                    onPause={handlePause}
+                    onResume={handleResume}
+                    onRetry={handleRetry}
+                    onRemove={handleRemove}
+                    containerHeight={400}
+                    itemHeight={140}
+                  />
                 </div>
               )}
 
               {/* Recently Completed */}
               {completedItems.length > 0 && (
-                <div>
+                <div className="mt-8 pt-6 border-t border-slate-700/50 bg-gradient-to-br from-slate-800/20 to-slate-900/20 rounded-xl p-4">
                   <div className="flex items-center space-x-2 mb-4">
                     <CheckCircle className="w-5 h-5 text-lime-400" />
                     <h2 className="text-lg font-semibold text-white">Recently Completed</h2>
                     <span className="text-sm text-white/60">({completedItems.length})</span>
                   </div>
-                  <div className="grid gap-4">
-                    {completedItems.map((download) => (
-                      <DownloadCard
+                  <div className="space-y-4">
+                    {completedItems.map((download, index) => (
+                      <div
                         key={download.id}
-                        download={download}
-                        onPause={handlePause}
-                        onResume={handleResume}
-                        onRetry={handleRetry}
-                        onRemove={handleRemove}
-                      />
+                        className="relative group"
+                        style={{ 
+                          zIndex: completedItems.length - index,
+                          animationDelay: `${index * 0.1}s`
+                        }}
+                      >
+                        <OptimizedMotionDiv
+                          variants="slideUp"
+                          className="relative transform transition-all duration-300 hover:scale-[1.02] hover:shadow-xl"
+                        >
+                          <DownloadCard
+                            download={download}
+                            onPause={handlePause}
+                            onResume={handleResume}
+                            onRetry={handleRetry}
+                            onRemove={handleRemove}
+                          />
+                        </OptimizedMotionDiv>
+                      </div>
                     ))}
                   </div>
                 </div>
               )}
             </div>
           )}
-        </AnimatePresence>
+        </OptimizedAnimatePresence>
+        
+        {/* Performance optimization: Pagination component */}
+        {paginationInfo.totalPages > 1 && (
+          <div className="mt-6">
+            <Pagination
+              currentPage={paginationInfo.currentPage}
+              totalPages={paginationInfo.totalPages}
+              totalItems={paginationInfo.totalItems}
+              pageSize={paginationInfo.pageSize}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
