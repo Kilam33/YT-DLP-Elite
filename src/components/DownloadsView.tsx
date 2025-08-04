@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '../store/store';
 import { 
@@ -104,6 +104,7 @@ const DownloadsView: React.FC = () => {
   const [ffmpegAvailable, setFfmpegAvailable] = useState(true);
   const [metadata, setMetadata] = useState<VideoMetadata | PlaylistMetadata | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [metadataFetchStartTime, setMetadataFetchStartTime] = useState<number | null>(null);
   
   const urlInputRef = useRef<HTMLInputElement>(null);
 
@@ -112,95 +113,105 @@ const DownloadsView: React.FC = () => {
     checkYtDlpAvailability();
     checkFfmpegAvailability();
     
+    // Test yt-dlp functionality
+    const testYtDlp = async () => {
+      try {
+        const result = await window.electronAPI?.testYtDlp();
+        console.log('yt-dlp test result:', result);
+        if (!result?.success) {
+          console.error('yt-dlp test failed:', result?.error);
+        } else {
+          console.log('yt-dlp version:', result?.version);
+        }
+      } catch (error) {
+        console.error('Failed to test yt-dlp:', error);
+      }
+    };
+    testYtDlp();
+    
     // Set up download update listener with debounced updates for performance
-          if (window.electronAPI) {
-        // Performance optimization: Handle single download updates
-        window.electronAPI.onDownloadUpdated((download) => {
-          // Use debounced updates for progress changes to reduce re-renders
-          if ((download.status === 'downloading' || download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing') && download.progress !== undefined && download.progress >= 0) {
-            queueUpdate({
-              id: download.id,
-              progress: download.progress,
-              speed: download.speed,
-              eta: download.eta,
-              downloaded: download.downloaded,
-              filesize: download.filesize,
-              status: download.status, // Include status in progress updates
-            });
-          } else {
-            // For status changes, update immediately
-            dispatch(updateDownload(download));
-            flushImmediately();
-          }
-          
-          // Remove from queue if download starts
-          if (download.status === 'downloading' || download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing' || download.status === 'pending') {
-            dispatch(removeFromQueue(download.id));
-          }
-
-          // Handle completed downloads with delay
-          if (download.status === 'completed') {
-            // Show success notification
-            toast.success(`Download completed: ${download.metadata?.title || 'Video'}`, {
-              duration: 3000,
-              icon: '✅',
-            });
-            
-            // Keep completed downloads visible for a moment before moving to history
-            setTimeout(() => {
-              // The download will automatically move to history view
-              // but we keep it visible in downloads for a moment for better UX
-            }, 3000); // 3 second delay
-          }
-        });
-
-        // Performance optimization: Handle batched download updates
-        window.electronAPI.onDownloadUpdatedBatch?.((downloads) => {
-          // Process multiple downloads at once for better performance
-          const updates = downloads.map(download => ({
+    if (window.electronAPI) {
+      // Performance optimization: Handle single download updates
+      window.electronAPI.onDownloadUpdated((download) => {
+        // Use debounced updates for progress changes to reduce re-renders
+        if ((download.status === 'downloading' || download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing') && download.progress !== undefined && download.progress >= 0) {
+          queueUpdate({
             id: download.id,
             progress: download.progress,
             speed: download.speed,
             eta: download.eta,
             downloaded: download.downloaded,
             filesize: download.filesize,
-            status: download.status,
-          }));
+            status: download.status, // Include status in progress updates
+          });
+        } else {
+          // For status changes, update immediately
+          dispatch(updateDownload(download));
+          flushImmediately();
+        }
+        
+        // Remove from queue if download starts (but not when it's just pending)
+        if (download.status === 'downloading' || download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing') {
+          dispatch(removeFromQueue(download.id));
+        }
 
-          // Use batch update for multiple downloads
-          if (updates.length > 1) {
-            dispatch(updateMultipleDownloads(updates as any));
-          } else if (updates.length === 1) {
-            dispatch(updateDownload(updates[0] as any));
+        // Handle completed downloads with delay
+        if (download.status === 'completed') {
+          // Show success notification
+          toast.success(`Download completed: ${download.metadata?.title || 'Video'}`);
+          
+          // Keep completed downloads visible for a moment before moving to history
+          setTimeout(() => {
+            // The download will automatically move to history view
+            // but we keep it visible in downloads for a moment for better UX
+          }, 3000); // 3 second delay
+        }
+      });
+
+      // Performance optimization: Handle batched download updates
+      window.electronAPI.onDownloadUpdatedBatch?.((downloads) => {
+        // Process multiple downloads at once for better performance
+        const updates = downloads.map(download => ({
+          id: download.id,
+          progress: download.progress,
+          speed: download.speed,
+          eta: download.eta,
+          downloaded: download.downloaded,
+          filesize: download.filesize,
+          status: download.status,
+        }));
+
+        // Use batch update for multiple downloads
+        if (updates.length > 1) {
+          dispatch(updateMultipleDownloads(updates as any));
+        } else if (updates.length === 1) {
+          dispatch(updateDownload(updates[0] as any));
+        }
+
+        // Handle queue removals and completions
+        downloads.forEach(download => {
+          if (download.status === 'downloading' || download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing') {
+            dispatch(removeFromQueue(download.id));
           }
 
-          // Handle queue removals and completions
-          downloads.forEach(download => {
-            if (download.status === 'downloading' || download.status === 'initializing' || download.status === 'connecting' || download.status === 'processing' || download.status === 'pending') {
-              dispatch(removeFromQueue(download.id));
-            }
-
-            if (download.status === 'completed') {
-              // Show success notification for batch updates
-              toast.success(`Download completed: ${download.metadata?.title || 'Video'}`, {
-                duration: 3000,
-                icon: '✅',
-              });
-              
-              setTimeout(() => {
-                // Keep completed downloads visible for a moment
-              }, 3000);
-            }
-          });
+          if (download.status === 'completed') {
+            // Show success notification for batch updates
+            toast.success(`Download completed: ${download.metadata?.title || 'Video'}`);
+            
+            setTimeout(() => {
+              // Keep completed downloads visible for a moment
+            }, 3000);
+          }
         });
-      }
+      });
+    }
 
     return () => {
       if (window.electronAPI) {
         window.electronAPI.removeDownloadUpdateListener();
       }
     };
-  }, [dispatch]);
+  }, []); // Remove dispatch from dependencies since it's stable
 
   // Focus URL input when view becomes active
   useEffect(() => {
@@ -216,7 +227,7 @@ const DownloadsView: React.FC = () => {
     if (url.trim() && ytDlpAvailable) {
       const timeoutId = setTimeout(() => {
         fetchMetadata();
-      }, 1000);
+      }, 300); // Reduced from 1000ms to 300ms for faster response
       return () => clearTimeout(timeoutId);
     } else {
       setMetadata(null);
@@ -224,7 +235,43 @@ const DownloadsView: React.FC = () => {
     }
   }, [url]);
 
-  const loadDownloads = async () => {
+  // Performance optimization: Pre-validate URL as user types
+  useEffect(() => {
+    if (url.trim()) {
+      const validateUrl = async () => {
+        try {
+          const isValid = await window.electronAPI?.preValidateUrl(url.trim());
+          // You could add visual feedback here if needed
+        } catch (error) {
+          console.warn('Failed to pre-validate URL:', error);
+        }
+      };
+      
+      const timeoutId = setTimeout(validateUrl, 200); // Quick validation
+      return () => clearTimeout(timeoutId);
+    }
+  }, [url]);
+
+  // Performance optimization: Pre-fetch qualities while metadata loads
+  useEffect(() => {
+    if (url.trim() && ytDlpAvailable && !metadata) {
+      // Pre-fetch qualities in parallel with metadata
+      const fetchQualities = async () => {
+        try {
+          const qualities = await window.electronAPI?.getAvailableQualities(url.trim());
+          if (qualities && qualities.length > 0) {
+            setQuality(qualities[0]); // Set best quality as default
+          }
+        } catch (error) {
+          console.warn('Failed to pre-fetch qualities:', error);
+        }
+      };
+      
+      fetchQualities();
+    }
+  }, [url, ytDlpAvailable, metadata]);
+
+  const loadDownloads = useCallback(async () => {
     try {
       // Performance optimization: Load from localStorage first for instant UI
       const storedDownloads = loadDownloadsFromStorage();
@@ -255,9 +302,9 @@ const DownloadsView: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [dispatch]);
 
-  const checkYtDlpAvailability = async () => {
+  const checkYtDlpAvailability = useCallback(async () => {
     try {
       const available = await window.electronAPI?.checkYtDlp();
       setYtDlpAvailable(available ?? false);
@@ -274,9 +321,9 @@ const DownloadsView: React.FC = () => {
         message: 'Failed to check yt-dlp availability',
       }));
     }
-  };
+  }, [dispatch]);
 
-  const checkFfmpegAvailability = async () => {
+  const checkFfmpegAvailability = useCallback(async () => {
     try {
       const available = await window.electronAPI?.checkFfmpeg();
       setFfmpegAvailable(available ?? false);
@@ -293,40 +340,66 @@ const DownloadsView: React.FC = () => {
         message: 'Failed to check FFmpeg availability',
       }));
     }
-  };
+  }, [dispatch]);
 
-  const fetchMetadata = async () => {
+  const fetchMetadata = useCallback(async () => {
     if (!url.trim()) return;
     
+    console.log('Starting metadata fetch for:', url);
     setIsLoadingMetadata(true);
+    setShowPreview(false); // Hide previous preview immediately
+    setMetadataFetchStartTime(Date.now());
+    
     try {
+      console.log('Waiting for metadata response...');
       const data = await window.electronAPI?.getMetadata(url.trim());
+      
+      console.log('Metadata response received:', data ? 'success' : 'null');
+      
       if (data) {
         setMetadata(data);
         setShowPreview(true);
         
-        // Set default quality to highest available
-        const qualities = getAvailableQualities(data.formats || []);
-        if (qualities.length > 0) {
-          setQuality(qualities[0]);
+        // Set default quality to highest available (if not already set by pre-fetch)
+        if (!quality || quality === '') {
+          if (isPlaylistMetadata(data)) {
+            // For playlists, set a default quality
+            setQuality('best');
+          } else {
+            const qualities = getAvailableQualities(data.formats || []);
+            if (qualities.length > 0) {
+              setQuality(qualities[0]);
+            }
+          }
         }
         
         dispatch(addLog({
           level: 'info',
           message: `Fetched metadata for: ${data.title}`,
         }));
+      } else {
+        console.error('No metadata received from backend');
+        dispatch(addLog({
+          level: 'error',
+          message: 'No metadata received from backend - yt-dlp may be taking longer than expected',
+        }));
       }
     } catch (error) {
       console.error('Failed to fetch metadata:', error);
       setMetadata(null);
+      setShowPreview(false);
+      
+      const errorMessage = `Failed to fetch metadata for URL: ${url}`;
+        
       dispatch(addLog({
         level: 'error',
-        message: `Failed to fetch metadata for URL: ${url}`,
+        message: errorMessage,
       }));
     } finally {
       setIsLoadingMetadata(false);
+      setMetadataFetchStartTime(null);
     }
-  };
+  }, [url, quality, dispatch]);
 
   const formatDuration = (seconds: number) => {
     const hours = Math.floor(seconds / 3600);
@@ -538,7 +611,7 @@ const DownloadsView: React.FC = () => {
   };
 
   const handleStartDownload = async () => {
-    // Validate URL
+    // Performance optimization: Pre-validate inputs
     const sanitizedUrl = sanitizeUrl(url.trim());
     const urlValidation = validateUrl(sanitizedUrl);
     if (!urlValidation.isValid) {
@@ -578,22 +651,29 @@ const DownloadsView: React.FC = () => {
         return;
       }
       
-      const download = await window.electronAPI?.addDownload(sanitizedUrl, downloadOptions);
-      
-      if (download) {
-        dispatch(addDownload(download));
+      if (isPlaylistMetadata(metadata)) {
+        // Handle playlist download
+        const maxVideos = 50; // Limit to 50 videos for testing
+        const videosToDownload = metadata.entries.slice(0, maxVideos);
         
-        // Start the download immediately
-        const started = await window.electronAPI?.startDownload(download.id);
-        if (started) {
-          notificationQueue.success('Download started successfully');
-        } else {
-          notificationQueue.error('Failed to start download');
-          dispatch(addLog({
-            level: 'error',
-            message: 'Failed to start download',
-            downloadId: download.id,
-          }));
+        notificationQueue.success(`Starting download of ${videosToDownload.length} videos from playlist`);
+        
+        // Add all videos to downloads and start them
+        for (let i = 0; i < videosToDownload.length; i++) {
+          const entry = videosToDownload[i];
+          const download = await window.electronAPI?.addDownload(entry.url, downloadOptions);
+          
+          if (download) {
+            dispatch(addDownload(download));
+            
+            // Start the download immediately
+            await window.electronAPI?.startDownload(download.id);
+            
+            // Small delay between starting downloads to avoid overwhelming the system
+            if (i < videosToDownload.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+          }
         }
         
         // Reset form
@@ -602,6 +682,33 @@ const DownloadsView: React.FC = () => {
         setOutputPath('');
         setMetadata(null);
         setShowPreview(false);
+      } else {
+        // Handle single video download
+        const download = await window.electronAPI?.addDownload(sanitizedUrl, downloadOptions);
+        
+        if (download) {
+          dispatch(addDownload(download));
+          
+          // Start the download immediately
+          const started = await window.electronAPI?.startDownload(download.id);
+          if (started) {
+            notificationQueue.success('Download started successfully');
+            
+            // Performance optimization: Reset form immediately after successful start
+            setUrl('');
+            setQuality('');
+            setOutputPath('');
+            setMetadata(null);
+            setShowPreview(false);
+          } else {
+            notificationQueue.error('Failed to start download');
+            dispatch(addLog({
+              level: 'error',
+              message: 'Failed to start download',
+              downloadId: download.id,
+            }));
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to start download:', error);
@@ -675,7 +782,8 @@ const DownloadsView: React.FC = () => {
     
     try {
       const playlistData = {
-        entries: metadata.entries,
+        playlistUrl: url.trim(), // Pass the original playlist URL
+        entries: metadata.entries, // Use all entries from metadata
         quality,
         outputPath: outputPath || settings.outputPath,
       };
@@ -839,7 +947,18 @@ const DownloadsView: React.FC = () => {
               <div className="flex items-center space-x-2 text-white/60">
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-lime-400"></div>
                 <span className="text-sm">Loading video information...</span>
+                {metadataFetchStartTime && (
+                  <span className="text-xs text-white/40">
+                    ({Math.floor((Date.now() - metadataFetchStartTime) / 1000)}s)
+                  </span>
+                )}
               </div>
+              <p className="text-xs text-white/40 mt-2">
+                This may take a few moments as yt-dlp analyzes the video
+                {url.includes('playlist') || url.includes('list=') ? (
+                  <span className="text-orange-400"> (Playlists may take longer)</span>
+                ) : null}
+              </p>
             </div>
           )}
 
@@ -859,12 +978,23 @@ const DownloadsView: React.FC = () => {
                     {/* Playlist Info */}
                     <div className="flex-1 min-w-0">
                       <h3 className="text-white font-semibold text-lg line-clamp-2 mb-2">
-                        📁 {metadata.title}
+                        🎬 Playlist: {metadata.title}
                       </h3>
                       <div className="flex items-center space-x-4 text-sm text-white/70">
                         <div className="flex items-center space-x-2 px-3 py-1 bg-lime-500/20 border border-lime-500/30 rounded-lg">
                           <Download className="w-4 h-4 text-lime-400" />
-                          <span className="text-lime-400 font-medium">{metadata.entries.length} videos</span>
+                          <span className="text-lime-400 font-medium">
+                            {metadata.entries.length} videos
+                            {metadata.entries.length > 50 && (
+                              <span className="text-orange-400 ml-1">(50 max)</span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2 px-3 py-1 bg-blue-500/20 border border-blue-500/30 rounded-lg">
+                          <Eye className="w-4 h-4 text-blue-400" />
+                          <span className="text-blue-400 font-medium text-xs">
+                            Preview: First 5 videos
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -897,7 +1027,19 @@ const DownloadsView: React.FC = () => {
                     ))}
                     {metadata.entries.length > 5 && (
                       <div className="text-sm text-white/60 text-center py-3 bg-slate-700/30 rounded-lg">
-                        ... and {metadata.entries.length - 5} more videos
+                        {metadata.entries.length > 50 ? (
+                          <>
+                            ... and {metadata.entries.length - 5} more videos
+                            <br />
+                            <span className="text-orange-400">Only first 50 will be processed</span>
+                          </>
+                        ) : (
+                          <>
+                            ... and {metadata.entries.length - 5} more videos
+                            <br />
+                            <span className="text-blue-400">Preview shows first 5 videos only</span>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
@@ -919,7 +1061,11 @@ const DownloadsView: React.FC = () => {
                           {!isPlaylistMetadata(metadata) ? getAvailableQualities((metadata as VideoMetadata).formats || []).map(q => (
                             <option key={q} value={q} className="text-lime-400 bg-slate-700">{q}</option>
                           )) : (
-                            <option value="" className="text-white/60">No quality options for playlists</option>
+                            <>
+                              <option value="best" className="text-lime-400 bg-slate-700">Best Quality</option>
+                              <option value="worst" className="text-lime-400 bg-slate-700">Worst Quality</option>
+                              <option value="audio" className="text-lime-400 bg-slate-700">Audio Only</option>
+                            </>
                           )}
                         </select>
                         <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
@@ -957,10 +1103,43 @@ const DownloadsView: React.FC = () => {
 
                   {/* Action Buttons */}
                   <div className="flex items-center justify-end space-x-3 pt-6 border-t border-slate-600/50">
+                    {/* Playlist length warning */}
+                    {metadata.entries.length > 50 && (
+                      <div className="flex-1">
+                        <div className="p-3 bg-orange-500/20 border border-orange-500/30 rounded-lg">
+                          <div className="flex items-center space-x-2 text-orange-400">
+                            <AlertCircle className="w-4 h-4" />
+                            <span className="text-sm font-medium">Large Playlist</span>
+                          </div>
+                          <p className="text-xs text-orange-300 mt-1">
+                            This playlist has {metadata.entries.length} videos. Only the first 50 will be processed for testing.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    <button
+                      onClick={handleStartDownload}
+                      disabled={isStartingDownload || isAddingDownload}
+                      className="px-8 py-3 rounded-lg bg-slate-600/50 hover:bg-slate-500/50 text-white/90 hover:text-white transition-all duration-200 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed border border-slate-500/30 hover:border-slate-400/50"
+                    >
+                      {isStartingDownload ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Starting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <DownloadIcon className="w-4 h-4" />
+                          <span>Download Now</span>
+                        </>
+                      )}
+                    </button>
+                    
                     <button
                       onClick={handleAddPlaylistToQueue}
                       disabled={isAddingDownload || isStartingDownload}
-                      className="px-6 py-3 rounded-lg bg-slate-600/50 hover:bg-slate-500/50 text-white/90 hover:text-white transition-all duration-200 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed border border-slate-500/30 hover:border-slate-400/50"
+                      className="px-8 py-3 rounded-lg bg-gradient-to-r from-lime-500 to-lime-600 hover:from-lime-600 hover:to-lime-700 text-white font-semibold transition-all duration-200 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl hover:shadow-lime-500/25"
                     >
                       {isAddingDownload ? (
                         <>
@@ -1044,7 +1223,11 @@ const DownloadsView: React.FC = () => {
                           {!isPlaylistMetadata(metadata) ? getAvailableQualities((metadata as VideoMetadata).formats || []).map(q => (
                             <option key={q} value={q} className="text-lime-400 bg-slate-700">{q}</option>
                           )) : (
-                            <option value="" className="text-white/60">No quality options for playlists</option>
+                            <>
+                              <option value="best" className="text-lime-400 bg-slate-700">Best Quality</option>
+                              <option value="worst" className="text-lime-400 bg-slate-700">Worst Quality</option>
+                              <option value="audio" className="text-lime-400 bg-slate-700">Audio Only</option>
+                            </>
                           )}
                         </select>
                         <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">

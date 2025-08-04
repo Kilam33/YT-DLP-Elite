@@ -10,6 +10,8 @@ export interface ElectronAPI {
   addPlaylistVideos: (playlistData: any) => Promise<any[]>;
   startDownload: (id: string) => Promise<boolean>;
   startQueue: () => Promise<boolean>;
+  pauseQueue: () => Promise<boolean>;
+  stopAllDownloads: () => Promise<boolean>;
   removeDownload: (id: string) => Promise<boolean>;
   pauseDownload: (id: string) => Promise<boolean>;
   resumeDownload: (id: string) => Promise<boolean>;
@@ -21,6 +23,8 @@ export interface ElectronAPI {
   
   // Metadata
   getMetadata: (url: string) => Promise<any>;
+  getAvailableQualities: (url: string) => Promise<string[]>;
+  preValidateUrl: (url: string) => Promise<boolean>;
   
   // Settings
   getSettings: () => Promise<any>;
@@ -39,10 +43,11 @@ export interface ElectronAPI {
   
   // Event listeners
   onDownloadUpdated: (callback: (download: any) => void) => void;
-  onDownloadUpdatedBatch?: (callback: (downloads: any[]) => void) => void;
   removeDownloadUpdateListener: () => void;
+  onDownloadUpdatedBatch: (callback: (downloads: any[]) => void) => void;
   onLogAdded: (callback: (logData: any) => void) => void;
   removeLogAddedListener: () => void;
+  testYtDlp: () => Promise<{ success: boolean; version?: string; error?: string }>;
 }
 
 declare global {

@@ -17,7 +17,8 @@ import {
   Pause, 
   MoveUp, 
   MoveDown, 
-  Trash2
+  Trash2,
+  Square
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -89,7 +90,7 @@ const QueueView: React.FC = () => {
 
   const handlePauseQueue = async () => {
     try {
-      // Note: pauseQueue method doesn't exist in ElectronAPI, so we'll just update the state
+      await window.electronAPI?.pauseQueue();
       dispatch(setProcessing(false));
       toast.success('Queue paused');
       dispatch(addLog({
@@ -165,6 +166,25 @@ const QueueView: React.FC = () => {
     }
   };
 
+  const handleStopAllDownloads = async () => {
+    try {
+      await window.electronAPI?.stopAllDownloads();
+      dispatch(setProcessing(false));
+      toast.success('All downloads stopped');
+      dispatch(addLog({
+        level: 'info',
+        message: 'All downloads stopped',
+      }));
+    } catch (error) {
+      console.error('Failed to stop all downloads:', error);
+      toast.error('Failed to stop all downloads');
+      dispatch(addLog({
+        level: 'error',
+        message: 'Failed to stop all downloads',
+      }));
+    }
+  };
+
   // Get queued downloads by matching IDs and filter out undefined
   const queuedDownloads = queueIds
     .map(id => downloads.find(d => d.id === id))
@@ -210,6 +230,13 @@ const QueueView: React.FC = () => {
                     <span>Start Queue</span>
                   </button>
                 )}
+                <button
+                  onClick={handleStopAllDownloads}
+                  className="px-4 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-red-300 transition-colors flex items-center space-x-2"
+                >
+                  <Square className="w-4 h-4" />
+                  <span>Stop All</span>
+                </button>
                 <button
                   onClick={handleClearQueue}
                   className="px-4 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-red-300 transition-colors flex items-center space-x-2"

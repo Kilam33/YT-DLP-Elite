@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   addPlaylistVideos: (playlistData) => ipcRenderer.invoke('add-playlist-videos', playlistData),
   startDownload: (id) => ipcRenderer.invoke('start-download', id),
   startQueue: () => ipcRenderer.invoke('start-queue'),
+  pauseQueue: () => ipcRenderer.invoke('pause-queue'),
+  stopAllDownloads: () => ipcRenderer.invoke('stop-all-downloads'),
   removeDownload: (id) => ipcRenderer.invoke('remove-download', id),
   pauseDownload: (id) => ipcRenderer.invoke('pause-download', id),
   resumeDownload: (id) => ipcRenderer.invoke('resume-download', id),
@@ -23,6 +25,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Metadata
   getMetadata: (url) => ipcRenderer.invoke('get-metadata', url),
+  getAvailableQualities: (url) => ipcRenderer.invoke('get-available-qualities', url),
+  preValidateUrl: (url) => ipcRenderer.invoke('pre-validate-url', url),
   
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
@@ -46,10 +50,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeDownloadUpdateListener: () => {
     ipcRenderer.removeAllListeners('download-updated');
   },
+  onDownloadUpdatedBatch: (callback) => {
+    ipcRenderer.on('download-updated-batch', (event, downloads) => callback(downloads));
+  },
   onLogAdded: (callback) => {
     ipcRenderer.on('log-added', (event, logData) => callback(logData));
   },
   removeLogAddedListener: () => {
     ipcRenderer.removeAllListeners('log-added');
-  }
+  },
+  testYtDlp: () => ipcRenderer.invoke('test-yt-dlp'),
 });

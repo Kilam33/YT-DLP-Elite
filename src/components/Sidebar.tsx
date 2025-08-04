@@ -25,14 +25,23 @@ import { findPresetById } from '../config/presets';
 
 const Sidebar: React.FC = () => {
   const dispatch = useDispatch();
-  const { activeView, sidebarCollapsed } = useSelector((state: RootState) => state.ui);
+  const { activeView, sidebarCollapsed, logs } = useSelector((state: RootState) => state.ui);
   const settings = useSelector((state: RootState) => state.settings.data);
   const downloads = useSelector((state: RootState) => state.downloads.items);
+  const queue = useSelector((state: RootState) => state.queue.items);
   const [showPresetSelector, setShowPresetSelector] = useState(false);
 
-  const activeDownloads = downloads.filter(d => d.status === 'downloading').length;
+  const activeDownloads = downloads.filter(d => 
+    d.status === 'downloading' || 
+    d.status === 'paused' || 
+    d.status === 'initializing' || 
+    d.status === 'connecting' || 
+    d.status === 'processing'
+  ).length;
   const completedDownloads = downloads.filter(d => d.status === 'completed').length;
   const failedDownloads = downloads.filter(d => d.status === 'error').length;
+  const queuedDownloads = queue.length;
+  const errorLogs = logs.filter(log => log.level === 'error').length;
 
   // Most commonly used presets for quick access
   const quickActions = [
@@ -121,7 +130,8 @@ const Sidebar: React.FC = () => {
       icon: Clock,
       label: 'Queue',
       description: 'Pending downloads',
-      badge: null
+      badge: queuedDownloads > 0 ? queuedDownloads.toString() : null,
+      badgeColor: 'bg-orange-500'
     },
     {
       id: 'history',
@@ -136,7 +146,7 @@ const Sidebar: React.FC = () => {
       icon: FileText,
       label: 'Logs',
       description: 'System logs',
-      badge: failedDownloads > 0 ? failedDownloads.toString() : null,
+      badge: errorLogs > 0 ? errorLogs.toString() : null,
       badgeColor: 'bg-red-500'
     }
   ];

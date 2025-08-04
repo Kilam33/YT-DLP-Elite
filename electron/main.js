@@ -4,7 +4,6 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
-import YtDlpProcessPool from './processPool.js';
 import ResourceMonitor from './resourceMonitor.js';
 
 // ES module equivalent of __dirname
@@ -18,27 +17,13 @@ let downloads = new Map();
 let downloadQueue = [];
 let activeDownloads = 0;
 let maxConcurrentDownloads = 3;
-let ytDlpProcessPool;
 let resourceMonitor;
+let isQueuePaused = false; // Global pause state for queue processing
 
 // Initialize process pool (disabled for now to prevent rapid process creation)
 function initializeProcessPool() {
-  try {
-    // Temporarily disable process pool to prevent rapid process creation
-    // ytDlpProcessPool = new YtDlpProcessPool(settings.maxConcurrentDownloads || 3);
-    console.log('Process pool disabled to prevent rapid process creation');
-    
-    // Set up process pool event handlers
-    // ytDlpProcessPool.on('processError', ({ processId, error }) => {
-    //   console.error(`Process pool error for process ${processId}:`, error);
-    // });
-    
-    // ytDlpProcessPool.on('error', (error) => {
-    //   console.error('Process pool error:', error);
-    // });
-  } catch (error) {
-    console.error('Failed to initialize process pool:', error);
-  }
+  // Process pool removed - using direct spawn for all operations
+  console.log('Process pool removed - using direct spawn for all operations');
 }
 
 // Initialize resource monitoring
@@ -282,10 +267,6 @@ app.on('window-all-closed', () => {
 
 // Cleanup processes on app exit
 app.on('before-quit', () => {
-  if (ytDlpProcessPool) {
-    console.log('Shutting down process pool...');
-    ytDlpProcessPool.shutdown();
-  }
   if (resourceMonitor) {
     console.log('Stopping resource monitoring...');
     resourceMonitor.cleanup();
@@ -294,9 +275,6 @@ app.on('before-quit', () => {
 
 // Handle process termination signals
 process.on('SIGTERM', () => {
-  if (ytDlpProcessPool) {
-    ytDlpProcessPool.shutdown();
-  }
   if (resourceMonitor) {
     resourceMonitor.cleanup();
   }
@@ -304,9 +282,6 @@ process.on('SIGTERM', () => {
 });
 
 process.on('SIGINT', () => {
-  if (ytDlpProcessPool) {
-    ytDlpProcessPool.shutdown();
-  }
   if (resourceMonitor) {
     resourceMonitor.cleanup();
   }
@@ -328,21 +303,6 @@ ipcMain.handle('check-yt-dlp', async () => {
 
 ipcMain.handle('check-ffmpeg', async () => {
   return await checkFfmpeg();
-});
-
-// Process pool management
-ipcMain.handle('get-process-pool-stats', () => {
-  if (ytDlpProcessPool) {
-    return ytDlpProcessPool.getStats();
-  }
-  return null;
-});
-
-ipcMain.handle('health-check-process-pool', async () => {
-  if (ytDlpProcessPool) {
-    return await ytDlpProcessPool.healthCheck();
-  }
-  return [];
 });
 
 // Resource monitoring handlers
@@ -486,43 +446,138 @@ ipcMain.handle('add-download', async (event, url, options = {}) => {
 ipcMain.handle('add-playlist-videos', async (event, playlistData) => {
   const results = [];
   
-  for (const entry of playlistData.entries) {
-    const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    const download = {
-      id,
-      url: entry.url,
-      quality: playlistData.quality || 'best',
-      outputPath: playlistData.outputPath || settings.outputPath,
-      status: 'pending',
-      progress: 0,
-      speed: 0,
-      eta: null,
-      downloaded: 0,
-      filesize: 0,
-      startedAt: null,
-      completedAt: null,
-      metadata: {
-        title: entry.title,
-        duration: entry.duration,
-        uploader: entry.uploader,
-        thumbnail: entry.thumbnail
-      },
-      filename: null,
-      retryCount: 0,
-      addedAt: new Date()
-    };
+  // Use the entries from metadata if available, otherwise fetch from URL
+  if (playlistData.entries && playlistData.entries.length > 0) {
+    // Use the entries that were already fetched in metadata
+    console.log(`Adding ${playlistData.entries.length} videos from playlist metadata to queue`);
+    
+    for (const entry of playlistData.entries) {
+      const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      const download = {
+        id,
+        url: entry.url,
+        quality: playlistData.quality || 'best',
+        outputPath: playlistData.outputPath || settings.outputPath,
+        status: 'pending',
+        progress: 0,
+        speed: 0,
+        eta: null,
+        downloaded: 0,
+        filesize: 0,
+        startedAt: null,
+        completedAt: null,
+        metadata: {
+          title: entry.title,
+          duration: entry.duration,
+          uploader: entry.uploader,
+          thumbnail: entry.thumbnail
+        },
+        filename: null,
+        retryCount: 0,
+        addedAt: new Date()
+      };
 
-    downloads.set(id, download);
-    downloadQueue.push(id);
-    results.push(serializeDownload(download));
+      downloads.set(id, download);
+      downloadQueue.push(id);
+      results.push(serializeDownload(download));
+    }
+    
+    // Auto-start downloads if enabled
+    if (settings.autoStartDownloads) {
+      processQueue();
+    }
+    
+    return results;
+  } else if (playlistData.playlistUrl) {
+    // Fallback: fetch from URL with the same limited approach as metadata
+    try {
+      console.log('Fetching playlist videos for:', playlistData.playlistUrl);
+      
+      // Use the same approach as metadata fetching
+      const process = spawn('yt-dlp', [
+        '--dump-json',
+        '--no-warnings',
+        playlistData.playlistUrl
+      ]);
+
+      let output = '';
+      let errorOutput = '';
+
+      process.stdout.on('data', (data) => {
+        output += data.toString();
+      });
+
+      process.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+        console.log('Playlist fetch stderr:', data.toString());
+      });
+
+      return new Promise((resolve) => {
+        process.on('close', (code) => {
+          if (code === 0 && output.trim()) {
+            try {
+              const lines = output.trim().split('\n').filter(line => line.trim());
+              const entries = lines.map(line => JSON.parse(line));
+              
+              console.log(`Adding ${entries.length} videos from playlist to queue`);
+              
+              entries.forEach((entry, index) => {
+                const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+                const download = {
+                  id,
+                  url: entry.webpage_url || entry.url,
+                  quality: playlistData.quality || 'best',
+                  outputPath: playlistData.outputPath || settings.outputPath,
+                  status: 'pending',
+                  progress: 0,
+                  speed: 0,
+                  eta: null,
+                  downloaded: 0,
+                  filesize: 0,
+                  startedAt: null,
+                  completedAt: null,
+                  metadata: {
+                    title: entry.title,
+                    duration: entry.duration || 0,
+                    uploader: entry.uploader,
+                    thumbnail: entry.thumbnail || ''
+                  },
+                  filename: null,
+                  retryCount: 0,
+                  addedAt: new Date()
+                };
+
+                downloads.set(id, download);
+                downloadQueue.push(id);
+                results.push(serializeDownload(download));
+              });
+              
+              // Auto-start downloads if enabled
+              if (settings.autoStartDownloads) {
+                processQueue();
+              }
+              
+              resolve(results);
+            } catch (error) {
+              console.error('Failed to parse playlist videos:', error);
+              resolve([]);
+            }
+          } else {
+            console.error('Failed to fetch playlist videos:', errorOutput);
+            console.error('Process exit code:', code);
+            console.error('Output length:', output.length);
+            resolve([]);
+          }
+        });
+      });
+    } catch (error) {
+      console.error('Failed to fetch playlist videos:', error);
+      return [];
+    }
+  } else {
+    console.error('No playlist data provided');
+    return [];
   }
-  
-  // Auto-start downloads if enabled
-  if (settings.autoStartDownloads) {
-    processQueue();
-  }
-  
-  return results;
 });
 
 ipcMain.handle('start-download', async (event, id) => {
@@ -545,8 +600,36 @@ ipcMain.handle('start-download', async (event, id) => {
 });
 
 ipcMain.handle('start-queue', () => {
-  // Start processing the queue
+  // Resume queue processing
+  isQueuePaused = false;
   processQueue();
+  return true;
+});
+
+ipcMain.handle('pause-queue', () => {
+  // Pause queue processing
+  isQueuePaused = true;
+  return true;
+});
+
+ipcMain.handle('stop-all-downloads', () => {
+  // Stop all active downloads and pause queue
+  isQueuePaused = true;
+  
+  // Kill all active download processes
+  Array.from(downloads.values()).forEach(download => {
+    if (download.process && download.status === 'downloading') {
+      download.process.kill('SIGTERM');
+      download.status = 'paused';
+      downloads.set(download.id, download);
+      
+      // Send update to frontend
+      if (mainWindow) {
+        mainWindow.webContents.send('download-updated', serializeDownload(download));
+      }
+    }
+  });
+  
   return true;
 });
 
@@ -603,111 +686,366 @@ ipcMain.handle('clear-completed', () => {
   return true;
 });
 
+// Performance optimization: Metadata cache
+const metadataCache = new Map();
+const METADATA_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Performance optimization: URL validation cache
+const urlValidationCache = new Map();
+const URL_VALIDATION_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+// Performance optimization: Pre-validate URL for faster download initiation
+ipcMain.handle('pre-validate-url', async (event, url) => {
+  return new Promise((resolve) => {
+    const cacheKey = url.trim();
+    const cached = urlValidationCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp) < URL_VALIDATION_CACHE_TTL) {
+      resolve(cached.isValid);
+      return;
+    }
+
+    try {
+      new URL(url);
+      const isValid = true;
+      urlValidationCache.set(cacheKey, {
+        isValid,
+        timestamp: Date.now()
+      });
+      resolve(isValid);
+    } catch (error) {
+      const isValid = false;
+      urlValidationCache.set(cacheKey, {
+        isValid,
+        timestamp: Date.now()
+      });
+      resolve(isValid);
+    }
+  });
+});
+
+// Performance optimization: Enhanced metadata fetching with process pool
 ipcMain.handle('get-metadata', async (event, url) => {
+  console.log('=== METADATA FETCH START ===');
+  console.log('URL:', url);
+  
   return new Promise((resolve) => {
     // Validate URL first
     try {
       new URL(url);
+      console.log('URL validation passed');
     } catch (error) {
       console.error('Invalid URL:', url);
       resolve(null);
       return;
     }
 
-    // First, check if this is a playlist by getting playlist info
-    const playlistCheck = spawn('yt-dlp', [
-      '--dump-json',
-      '--flat-playlist',
-      '--no-warnings',
-      url
-    ]);
+    // Check cache first
+    const cacheKey = url.trim();
+    const cached = metadataCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp) < METADATA_CACHE_TTL) {
+      console.log('Using cached metadata for:', url);
+      resolve(cached.data);
+      return;
+    }
 
-    let playlistOutput = '';
-    let playlistErrorOutput = '';
+    console.log('Fetching metadata for:', url);
+    console.log('Using direct spawn for metadata (process pool disabled)');
 
-    playlistCheck.stdout.on('data', (data) => {
-      playlistOutput += data.toString();
-    });
+    // Always use direct spawn for now
+    fetchMetadataWithSpawn(url, resolve);
+  });
+});
 
-    playlistCheck.stderr.on('data', (data) => {
-      playlistErrorOutput += data.toString();
-    });
+// Fallback function for direct spawn metadata fetching
+function fetchMetadataWithSpawn(url, resolve) {
+  console.log('=== DIRECT SPAWN START ===');
+  console.log('Spawning yt-dlp for URL:', url);
+  
+  // Check if this is a playlist URL
+  const isPlaylist = url.includes('playlist') || url.includes('list=');
+  
+  // Use minimal arguments to let yt-dlp handle requests naturally
+  const args = [
+    '--no-warnings'
+  ];
+  
+  // For playlists, use dump-json to get all videos
+  if (isPlaylist) {
+    args.push('--dump-json');
+    console.log('Detected playlist URL, fetching all videos for complete preview');
+  } else {
+    args.push('--dump-json');
+    args.push('--no-playlist');
+  }
+  
+  // Add the URL
+  args.push(url);
+  
+  const process = spawn('yt-dlp', args);
 
-    playlistCheck.on('close', (code) => {
-      if (code === 0 && playlistOutput.trim()) {
-        try {
-          const lines = playlistOutput.trim().split('\n');
-          const playlistEntries = lines.map(line => JSON.parse(line));
+  let output = '';
+  let errorOutput = '';
+  let startTime = Date.now();
+
+  process.stdout.on('data', (data) => {
+    output += data.toString();
+    const elapsed = Date.now() - startTime;
+    console.log(`Direct spawn stdout data received, length: ${data.toString().length}, elapsed: ${elapsed}ms`);
+  });
+
+  process.stderr.on('data', (data) => {
+    errorOutput += data.toString();
+    console.log('Direct spawn stderr data received:', data.toString());
+  });
+
+  process.on('close', (code) => {
+    const elapsed = Date.now() - startTime;
+    console.log(`Direct spawn metadata fetch completed with code: ${code}, elapsed: ${elapsed}ms`);
+    console.log('Total output length:', output.length);
+    console.log('Total error output length:', errorOutput.length);
+    
+    if (code === 0 && output.trim()) {
+      try {
+        const lines = output.trim().split('\n');
+        console.log('Direct spawn JSON lines:', lines.length);
+        const entries = lines.map(line => JSON.parse(line));
+        
+        let metadata;
+        const isPlaylist = url.includes('playlist') || url.includes('list=');
+        
+        if (isPlaylist && entries.length > 0) {
+          // This is a playlist - yt-dlp outputs one JSON object per video in the playlist
+          const firstEntry = entries[0];
+          const playlistTitle = firstEntry?.playlist_title || 'Playlist';
           
-          // Check if this is a playlist (multiple entries or playlist metadata)
-          if (playlistEntries.length > 1 || (playlistEntries[0] && playlistEntries[0]._type === 'playlist')) {
-            // This is a playlist
-            const playlistInfo = {
-              _type: 'playlist',
-              title: playlistEntries[0]?.playlist_title || 'Playlist',
-              entries: playlistEntries.map(entry => ({
-                id: entry.id,
-                title: entry.title,
-                duration: entry.duration,
-                uploader: entry.uploader,
-                thumbnail: entry.thumbnail,
-                url: entry.url || entry.webpage_url
-              }))
-            };
-            resolve(playlistInfo);
-          } else {
-            // This is a single video, get detailed metadata
-            const singleVideo = spawn('yt-dlp', [
-              '--dump-json',
-              '--no-playlist',
-              '--no-warnings',
-              url
-            ]);
-
-            let output = '';
-            let errorOutput = '';
-
-            singleVideo.stdout.on('data', (data) => {
-              output += data.toString();
-            });
-
-            singleVideo.stderr.on('data', (data) => {
-              errorOutput += data.toString();
-            });
-
-            singleVideo.on('close', (code) => {
-              if (code === 0 && output.trim()) {
-                try {
-                  const metadata = JSON.parse(output);
-                  resolve(metadata);
-                } catch (error) {
-                  console.error('Failed to parse yt-dlp output:', error);
-                  resolve(null);
-                }
-              } else {
-                console.error('yt-dlp metadata extraction failed:', errorOutput);
-                resolve(null);
-              }
-            });
-
-            singleVideo.on('error', (error) => {
-              console.error('Failed to spawn yt-dlp:', error);
-              resolve(null);
-            });
+          metadata = {
+            _type: 'playlist',
+            title: playlistTitle,
+            entries: entries.map(entry => ({
+              id: entry.id,
+              title: entry.title,
+              duration: entry.duration || 0,
+              uploader: entry.uploader,
+              thumbnail: entry.thumbnail || '',
+              url: entry.webpage_url || entry.url
+            }))
+          };
+          
+          console.log(`Playlist metadata extracted: ${entries.length} videos from ${playlistTitle}`);
+        } else if (entries.length > 1) {
+          // Multiple entries but not explicitly a playlist
+          metadata = {
+            _type: 'playlist',
+            title: 'Playlist',
+            entries: entries.map(entry => ({
+              id: entry.id,
+              title: entry.title,
+              duration: entry.duration,
+              uploader: entry.uploader,
+              thumbnail: entry.thumbnail,
+              url: entry.url || entry.webpage_url
+            }))
+          };
+        } else {
+          // Single video
+          metadata = entries[0];
+        }
+        
+        // Cache the result
+        const cacheKey = url.trim();
+        metadataCache.set(cacheKey, {
+          data: metadata,
+          timestamp: Date.now()
+        });
+        
+        console.log('Direct spawn metadata fetched successfully:', metadata?.title || 'Unknown');
+        console.log('=== DIRECT SPAWN SUCCESS ===');
+        resolve(metadata);
+      } catch (error) {
+        console.error('Failed to parse yt-dlp output from direct spawn:', error);
+        console.error('Raw output:', output);
+        console.log('=== DIRECT SPAWN PARSE ERROR ===');
+        resolve(null);
+      }
+    } else {
+      console.error('yt-dlp metadata extraction failed:', errorOutput);
+      console.log('=== DIRECT SPAWN FAILED ===');
+      
+      // Try a simpler approach if the first attempt fails
+      console.log('Attempting fallback with simpler arguments...');
+      const fallbackArgs = [
+        '--dump-json',
+        '--no-warnings',
+        '--ignore-errors'
+      ];
+      
+      if (!isPlaylist) {
+        fallbackArgs.push('--no-playlist');
+      }
+      
+      fallbackArgs.push(url);
+      
+      const fallbackProcess = spawn('yt-dlp', fallbackArgs);
+      let fallbackOutput = '';
+      let fallbackErrorOutput = '';
+      
+      fallbackProcess.stdout.on('data', (data) => {
+        fallbackOutput += data.toString();
+      });
+      
+      fallbackProcess.stderr.on('data', (data) => {
+        fallbackErrorOutput += data.toString();
+      });
+      
+      fallbackProcess.on('close', (fallbackCode) => {
+        if (fallbackCode === 0 && fallbackOutput.trim()) {
+          try {
+            const lines = fallbackOutput.trim().split('\n');
+            const entries = lines.map(line => JSON.parse(line));
+            
+            let metadata;
+            if (isPlaylist && entries.length > 0) {
+              const firstEntry = entries[0];
+              const playlistTitle = firstEntry?.playlist_title || 'Playlist';
+              
+              metadata = {
+                _type: 'playlist',
+                title: playlistTitle,
+                entries: entries.map(entry => ({
+                  id: entry.id,
+                  title: entry.title,
+                  duration: entry.duration || 0,
+                  uploader: entry.uploader,
+                  thumbnail: entry.thumbnail || '',
+                  url: entry.webpage_url || entry.url
+                }))
+              };
+            } else if (entries.length > 1) {
+              metadata = {
+                _type: 'playlist',
+                title: 'Playlist',
+                entries: entries.map(entry => ({
+                  id: entry.id,
+                  title: entry.title,
+                  duration: entry.duration,
+                  uploader: entry.uploader,
+                  thumbnail: entry.thumbnail,
+                  url: entry.url || entry.webpage_url
+                }))
+              };
+            } else {
+              metadata = entries[0];
+            }
+            
+            console.log('Fallback metadata fetch successful:', metadata?.title || 'Unknown');
+            resolve(metadata);
+          } catch (error) {
+            console.error('Fallback metadata parsing failed:', error);
+            resolve(null);
           }
-        } catch (error) {
-          console.error('Failed to parse playlist output:', error);
+        } else {
+          console.error('Fallback metadata extraction also failed:', fallbackErrorOutput);
           resolve(null);
         }
-      } else {
-        console.error('yt-dlp playlist check failed:', playlistErrorOutput);
+      });
+      
+      fallbackProcess.on('error', (error) => {
+        console.error('Fallback process error:', error);
         resolve(null);
+      });
+    }
+  });
+
+  process.on('error', (error) => {
+    const elapsed = Date.now() - startTime;
+    console.error(`Failed to spawn yt-dlp for metadata after ${elapsed}ms:`, error);
+    console.log('=== DIRECT SPAWN ERROR ===');
+    resolve(null);
+  });
+}
+
+// Performance optimization: Pre-fetch available qualities
+ipcMain.handle('get-available-qualities', async (event, url) => {
+  return new Promise((resolve) => {
+    // Process pool removed - using direct spawn for all operations
+    // Use the same robust arguments as metadata fetching
+    const isPlaylist = url.includes('playlist') || url.includes('list=');
+    
+    const args = [
+      '--dump-json',
+      '--no-warnings'
+    ];
+    
+    if (isPlaylist) {
+      // For playlists, don't use --no-playlist to allow playlist extraction
+    } else {
+      args.push('--no-playlist');
+    }
+    
+    args.push(url);
+    
+    const process = spawn('yt-dlp', args);
+
+    let output = '';
+    let errorOutput = '';
+
+    process.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    process.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+
+    process.on('close', (code) => {
+      if (code === 0 && output.trim()) {
+        try {
+          const lines = output.trim().split('\n');
+          const entries = lines.map(line => JSON.parse(line));
+          
+          // For playlists, we can't get quality options, so return empty
+          if (entries.length > 1 || (entries[0] && entries[0]._type === 'playlist')) {
+            resolve([]);
+            return;
+          }
+          
+          // For single videos, extract quality options
+          const metadata = entries[0];
+          const qualities = [];
+          
+          if (metadata.formats) {
+            const qualitySet = new Set();
+            metadata.formats.forEach(format => {
+              if (format.height) {
+                qualitySet.add(`${format.height}p`);
+              }
+              if (format.vcodec === 'none' && format.acodec !== 'none') {
+                qualitySet.add('audio');
+              }
+            });
+            
+            qualities.push(...Array.from(qualitySet).sort((a, b) => {
+              if (a === 'audio') return 1;
+              if (b === 'audio') return -1;
+              const aHeight = parseInt(a.replace('p', ''));
+              const bHeight = parseInt(b.replace('p', ''));
+              return bHeight - aHeight;
+            }));
+          }
+          
+          resolve(qualities);
+        } catch (error) {
+          console.error('Failed to parse qualities:', error);
+          resolve([]);
+        }
+      } else {
+        resolve([]);
       }
     });
 
-    playlistCheck.on('error', (error) => {
-      console.error('Failed to spawn yt-dlp for playlist check:', error);
-      resolve(null);
+    process.on('error', (error) => {
+      console.error('Failed to get qualities:', error);
+      resolve([]);
     });
   });
 });
@@ -812,6 +1150,12 @@ const sendLogUpdate = (logData) => {
 
 // Download processing with rate limiting
 async function processQueue() {
+  // Check if queue is paused
+  if (isQueuePaused) {
+    console.log('Queue processing is paused');
+    return;
+  }
+
   const currentActiveDownloads = Array.from(downloads.values()).filter(d => 
     d.status === 'downloading' || d.status === 'connecting' || d.status === 'initializing' || d.status === 'processing'
   ).length;
@@ -883,7 +1227,7 @@ function simulateDownload(id) {
     '--progress-template', 'download:[%(progress._percent_str)s] %(progress._speed_str)s ETA %(progress._eta_str)s downloaded %(progress._downloaded_bytes_str)s of %(progress._total_bytes_str)s',
     '--output', path.join(download.outputPath, settings.fileNamingTemplate),
     '--no-playlist',
-    '--no-warnings',
+    '--no-warnings'
   ];
 
   // Add custom arguments if specified
@@ -1503,3 +1847,48 @@ function parseEtaString(etaStr) {
   
   return null;
 }
+
+// Test process pool functionality
+ipcMain.handle('test-process-pool', async () => {
+  console.log('Testing process pool...');
+  console.log('Process pool available:', false); // Process pool removed
+  
+  return { success: false, error: 'Process pool disabled - using direct spawn' };
+});
+
+// Test yt-dlp availability
+ipcMain.handle('test-yt-dlp', async () => {
+  console.log('Testing yt-dlp availability...');
+  
+  return new Promise((resolve) => {
+    const process = spawn('yt-dlp', ['--version']);
+    
+    let output = '';
+    let errorOutput = '';
+    
+    process.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    process.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+    
+    process.on('close', (code) => {
+      console.log('yt-dlp test completed with code:', code);
+      console.log('yt-dlp version output:', output.trim());
+      console.log('yt-dlp error output:', errorOutput);
+      
+      if (code === 0) {
+        resolve({ success: true, version: output.trim() });
+      } else {
+        resolve({ success: false, error: errorOutput || 'Unknown error' });
+      }
+    });
+    
+    process.on('error', (error) => {
+      console.error('Failed to spawn yt-dlp:', error);
+      resolve({ success: false, error: error.message });
+    });
+  });
+});
